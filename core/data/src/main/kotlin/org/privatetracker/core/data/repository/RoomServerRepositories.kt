@@ -55,6 +55,7 @@ class RoomDeviceRepository @Inject constructor(private val dao: DeviceDao) : Dev
             protocolVersion = device.protocolVersion,
             publicKey = device.publicKey,
             lastSeenAt = device.lastSeenAt?.millis(),
+            approval = device.approval.name,
         )
         check(updated == 1) { "Device ${device.id} does not exist" }
     }

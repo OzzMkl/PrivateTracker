@@ -10,7 +10,9 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.routing.routing
 import org.privatetracker.core.common.time.Clock
+import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.repository.ServerConfigRepository
+import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
@@ -31,7 +33,10 @@ class ServerDependencies(
     val serverVersion: String,
     val clock: Clock,
     val serverConfig: ServerConfigRepository,
+    /** Signs health challenges, so paired trackers can tell this server from any other. */
+    val serverKeys: ServerKeys,
     val registerOrUpdateDevice: RegisterOrUpdateDevice,
+    val authenticateDevice: AuthenticateDevice,
     val ingestLocationBatch: IngestLocationBatch,
     val getDeviceOverviews: GetDeviceOverviews,
     val getDeviceDetail: GetDeviceDetail,
@@ -40,6 +45,8 @@ class ServerDependencies(
     val isLocalRequest: (ApplicationCall) -> Boolean = ApplicationCall::isLoopback,
     /** While true every request gets 503, so trackers keep their outbox and retry later. */
     val isShuttingDown: () -> Boolean = { false },
+    /** Called once per request, answered or refused, for the request count on the server screen. */
+    val onRequest: () -> Unit = {},
 )
 
 /** Installs protocol v1 on an engine-agnostic Ktor [Application]. */
@@ -49,6 +56,7 @@ fun Application.privateTrackerApi(deps: ServerDependencies) {
     install(
         createApplicationPlugin("ShutdownGuard") {
             onCall {
+                deps.onRequest()
                 if (deps.isShuttingDown()) {
                     throw ApiException(HttpStatusCode.ServiceUnavailable, ErrorCode.SHUTTING_DOWN, retryAfterSeconds = 30)
                 }

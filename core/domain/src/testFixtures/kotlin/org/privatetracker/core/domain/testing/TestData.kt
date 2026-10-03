@@ -1,6 +1,7 @@
 package org.privatetracker.core.domain.testing
 
 import org.privatetracker.core.domain.model.Device
+import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.Location
@@ -55,6 +56,7 @@ fun aDevice(
     id: DeviceId = DEVICE_A,
     name: String = "Pixel de Ana",
     lastSeenAt: Instant? = T0,
+    approval: DeviceApproval = DeviceApproval.APPROVED,
 ): Device = Device(
     id = id,
     name = name,
@@ -63,16 +65,20 @@ fun aDevice(
     protocolVersion = ProtocolVersion.CURRENT,
     createdAt = T0,
     lastSeenAt = lastSeenAt,
+    publicKey = fakePublicKey(id),
+    approval = approval,
 )
 
 fun aRegistration(
     id: DeviceId = DEVICE_A,
     name: String = "Pixel de Ana",
     protocolVersion: Int = ProtocolVersion.CURRENT,
+    publicKey: String = fakePublicKey(id),
 ): DeviceRegistration = DeviceRegistration(
     deviceId = id,
     name = name,
     platform = Platform.ANDROID,
     appVersion = "0.1.0",
     protocolVersion = protocolVersion,
+    publicKey = publicKey,
 )

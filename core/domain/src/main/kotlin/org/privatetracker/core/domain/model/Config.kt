@@ -17,6 +17,10 @@ data class TrackerConfig(
     val startOnBoot: Boolean = false,
     /** Desired state: when true, tracking is restored after the process dies or the phone reboots. */
     val trackingEnabled: Boolean = false,
+    /** The server's key, pinned when pairing with its QR code; blank for a server typed in by hand. */
+    val serverKey: String = "",
+    /** Every address the QR code listed, [serverUrl] among them, to try when the current one stops answering. */
+    val serverAddresses: List<String> = emptyList(),
 )
 
 /** Settings of the Server mode. Ranges are enforced by [org.privatetracker.core.domain.validation.ServerConfigValidator]. */

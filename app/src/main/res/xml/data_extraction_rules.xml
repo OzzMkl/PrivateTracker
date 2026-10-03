@@ -8,4 +8,11 @@
         <exclude domain="database" path="." />
         <exclude domain="file" path="datastore/" />
     </cloud-backup>
+    <!--
+        The device id stays behind on a transfer: its signing key lives in the Keystore and never moves,
+        so a copied id would be refused by the server (KEY_MISMATCH). The new phone gets a fresh id and key.
+    -->
+    <device-transfer>
+        <exclude domain="file" path="datastore/identity.json" />
+    </device-transfer>
 </data-extraction-rules>

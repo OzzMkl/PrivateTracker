@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="devices_title">Dispositivos</string>
+    <string name="devices_map_title">Mapa</string>
+    <string name="devices_empty_title">Aún no hay dispositivos</string>
+    <string name="devices_empty_body">Inicia el servidor y escribe una de sus direcciones en los ajustes de cada teléfono que vaya a compartir su ubicación.</string>
+    <string name="devices_seen">Visto %1$s</string>
+    <string name="devices_battery">Batería %1$d %%</string>
+    <string name="devices_map_empty">Ningún dispositivo ha enviado su ubicación todavía.</string>
+    <string name="devices_open_detail">Ver detalle</string>
+    <string name="devices_pending_title">Esperan aprobación</string>
+    <string name="devices_pending_hint">Aprueba solo si la huella coincide con la que muestra ese teléfono en Rastreo.</string>
+    <string name="devices_fingerprint">Huella %1$s</string>
+    <string name="devices_requested">Lo pidió %1$s</string>
+
+    <string name="device_detail_title">Dispositivo</string>
+    <string name="device_status">Estado</string>
+    <string name="device_last_seen">Última conexión</string>
+    <string name="device_platform">Plataforma</string>
+    <string name="device_app_version">Versión de la app</string>
+    <string name="device_registered">Registrado</string>
+    <string name="device_last_location">Última ubicación</string>
+    <string name="device_no_location">Este dispositivo aún no ha enviado ninguna ubicación.</string>
+    <string name="device_coordinates">Coordenadas</string>
+    <string name="device_accuracy">Precisión</string>
+    <string name="device_recorded">Tomada</string>
+    <string name="device_received">Recibida</string>
+    <string name="device_speed">Velocidad</string>
+    <string name="device_speed_value">%1$.1f km/h</string>
+    <string name="device_altitude">Altitud</string>
+    <string name="device_altitude_value">%1$.0f m</string>
+    <string name="device_battery">Batería</string>
+    <string name="device_battery_value">%1$d %%</string>
+    <string name="device_provider">Fuente</string>
+    <string name="device_mock">El dispositivo reporta una ubicación simulada.</string>
+    <string name="device_sessions">Sesiones recientes</string>
+    <string name="device_session_current">Activa desde %1$s · %2$s</string>
+    <string name="device_session_ended">%1$s – %2$s · %3$s</string>
+    <plurals name="device_session_positions">
+        <item quantity="one">%d posición</item>
+        <item quantity="many">%d posiciones</item>
+        <item quantity="other">%d posiciones</item>
+    </plurals>
+    <string name="device_session_address">Desde %1$s</string>
+    <string name="device_no_sessions">Sin sesiones registradas.</string>
+    <string name="device_removed">El dispositivo fue eliminado.</string>
+
+    <string name="device_access">Acceso</string>
+    <string name="device_approve">Aprobar</string>
+    <string name="device_reject">Rechazar</string>
+    <string name="device_revoke">Revocar acceso</string>
+    <string name="device_revoke_title">¿Revocar el acceso?</string>
+    <string name="device_revoke_body">El servidor rechazará sus posiciones desde ahora. Lo que ya envió se conserva.</string>
+    <string name="device_pending_hint">Compara la huella con la que muestra ese teléfono en Rastreo antes de aprobarlo.</string>
+    <string name="device_no_key">Se registró con una versión anterior de la app, sin clave. Cuando vuelva a conectarse enviará su clave y aparecerá en Esperan aprobación.</string>
+
+    <string name="device_rename">Renombrar</string>
+    <string name="device_rename_hint">El nombre volverá al del teléfono la próxima vez que se registre.</string>
+    <string name="device_name">Nombre</string>
+    <string name="device_remove">Eliminar</string>
+    <string name="device_remove_title">¿Eliminar este dispositivo?</string>
+    <string name="device_remove_body">Se borrarán sus posiciones y sesiones. Si el teléfono sigue enviando su ubicación, volverá a aparecer.</string>
+    <string name="cancel">Cancelar</string>
+    <string name="save">Guardar</string>
+    <string name="more">Más opciones</string>
+</resources>

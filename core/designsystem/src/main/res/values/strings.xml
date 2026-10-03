@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <!-- Domain errors, keyed by DomainError type. -->
+    <string name="error_validation">Revisa los datos marcados</string>
+    <string name="error_network_unreachable">No se pudo conectar con el servidor</string>
+    <string name="error_network_timeout">El servidor no respondió a tiempo</string>
+    <string name="error_invalid_response">El servidor respondió algo inesperado</string>
+    <string name="error_http">El servidor respondió con el error %1$d</string>
+    <string name="error_not_configured">Falta la URL del servidor</string>
+    <string name="error_device_not_registered">El servidor no reconoce este dispositivo</string>
+    <string name="error_device_not_found">El dispositivo ya no existe</string>
+    <string name="error_new_devices_disabled">El servidor no acepta dispositivos nuevos</string>
+    <string name="error_device_pending">El servidor aún no aprueba este teléfono</string>
+    <string name="error_device_rejected">El servidor rechazó este teléfono</string>
+    <string name="error_device_key">No se pudo usar la clave de este teléfono</string>
+    <string name="error_pairing_invalid">El código QR venció o ya lo usó otro teléfono: genera uno nuevo en el servidor</string>
+    <string name="error_server_identity">El servidor en esa dirección no es el tuyo: no demostró tener su clave</string>
+    <string name="error_signature_expired">El reloj de este teléfono y el del servidor difieren más de 5 minutos</string>
+    <string name="error_signature_replayed">El servidor ya había recibido esta petición</string>
+    <string name="error_signature_invalid">El servidor no aceptó la firma de este teléfono</string>
+    <string name="error_key_mismatch">El servidor tiene otra clave para este teléfono; elimínalo en el servidor para registrarlo de nuevo</string>
+    <string name="error_unsupported_protocol">El servidor usa otra versión del protocolo (%1$d)</string>
+    <plurals name="error_batch_too_large">
+        <item quantity="one">El servidor acepta como máximo %d posición por envío</item>
+        <item quantity="many">El servidor acepta como máximo %d posiciones por envío</item>
+        <item quantity="other">El servidor acepta como máximo %d posiciones por envío</item>
+    </plurals>
+    <string name="error_permission">Faltan permisos: %1$s</string>
+    <string name="error_port_in_use" tools:ignore="PluralsCandidate">El puerto %1$d está ocupado por otra app</string>
+    <string name="error_server_start_failed">El servidor no pudo arrancar: %1$s</string>
+
+    <!-- Validation rules. -->
+    <string name="violation_required">Obligatorio</string>
+    <string name="violation_out_of_range">Fuera del rango permitido</string>
+    <string name="violation_invalid_format">Formato no válido</string>
+    <string name="violation_too_long">Demasiado largo</string>
+
+    <!-- Permissions, short names. -->
+    <string name="permission_precise_location">Ubicación precisa</string>
+    <string name="permission_background_location">Ubicación todo el tiempo</string>
+    <string name="permission_notifications">Notificaciones</string>
+    <string name="permission_local_network">Acceso a la red local</string>
+    <string name="permission_battery">Sin optimización de batería</string>
+
+    <!-- Device status. -->
+    <string name="status_online">En línea</string>
+    <string name="status_stale">Inactivo</string>
+    <string name="status_offline">Sin conexión</string>
+
+    <!-- Device approval, from 0.2 on. -->
+    <string name="approval_pending">Pendiente de aprobación</string>
+    <string name="approval_approved">Aprobado</string>
+    <string name="approval_rejected">Rechazado</string>
+    <string name="approval_no_key">Sin clave</string>
+    <string name="key_fingerprint">Huella de la clave</string>
+
+    <string name="back">Atrás</string>
+    <string name="never">Nunca</string>
+    <string name="just_now">hace un momento</string>
+    <plurals name="minutes_ago">
+        <item quantity="one">hace %d minuto</item>
+        <item quantity="many">hace %d minutos</item>
+        <item quantity="other">hace %d minutos</item>
+    </plurals>
+    <plurals name="hours_ago">
+        <item quantity="one">hace %d hora</item>
+        <item quantity="many">hace %d horas</item>
+        <item quantity="other">hace %d horas</item>
+    </plurals>
+    <plurals name="days_ago">
+        <item quantity="one">hace %d día</item>
+        <item quantity="many">hace %d días</item>
+        <item quantity="other">hace %d días</item>
+    </plurals>
+    <string name="unknown">Desconocido</string>
+    <string name="coordinates">%1$.5f, %2$.5f</string>
+    <string name="accuracy_meters">±%1$.0f m</string>
+</resources>

@@ -38,3 +38,20 @@ include(":server:api")
 include(":core:database")
 include(":core:datastore")
 include(":core:data")
+
+// Android platform and UI building blocks.
+include(":core:location")
+include(":core:security")
+include(":core:designsystem")
+include(":core:map")
+include(":core:qr")
+
+// One module per role or screen group; features never depend on each other.
+include(":feature:onboarding")
+include(":feature:tracker")
+include(":feature:server")
+include(":feature:devices")
+include(":feature:settings")
+
+// Developer tools that run on a PC; never part of the app.
+include(":tools:simulator")

@@ -1,3 +1,10 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
     <string name="app_name">PrivateTracker</string>
+    <string name="nav_map">Mapa</string>
+    <string name="nav_devices">Dispositivos</string>
+    <string name="nav_server">Servidor</string>
+    <string name="nav_tracker">Rastreo</string>
+    <string name="nav_settings">Ajustes</string>
+    <string name="permissions_done">Listo</string>
+    <string name="pairing_link_needs_tracker">Este teléfono no comparte su ubicación. Cambia el modo en Ajustes para emparejarlo con un servidor.</string>
 </resources>

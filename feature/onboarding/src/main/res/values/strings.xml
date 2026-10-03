@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="onboarding_welcome">Bienvenido a PrivateTracker</string>
+    <string name="onboarding_tagline">Rastreo GPS privado: las ubicaciones viajan solo entre tus dispositivos, sin servicios en la nube.</string>
+    <string name="onboarding_question">¿Cómo vas a usar este teléfono?</string>
+    <string name="mode_tracker">Compartir mi ubicación</string>
+    <string name="mode_tracker_body">Este teléfono envía su posición a un servidor tuyo.</string>
+    <string name="mode_server">Recibir ubicaciones</string>
+    <string name="mode_server_body">Este teléfono guarda las posiciones de tus dispositivos y las muestra en un mapa.</string>
+    <string name="mode_both">Ambas cosas</string>
+    <string name="mode_both_body">Este teléfono es el servidor y además comparte su propia ubicación.</string>
+    <string name="onboarding_continue">Continuar</string>
+    <string name="onboarding_finish">Empezar</string>
+
+    <string name="permissions_title">Permisos</string>
+    <string name="permissions_intro">PrivateTracker solo pide lo que necesita el modo que elegiste. Puedes cambiarlos después en Ajustes.</string>
+    <string name="permissions_required">Necesario</string>
+    <string name="permissions_recommended">Recomendado</string>
+    <string name="permissions_granted">Concedido</string>
+    <string name="permissions_grant">Conceder</string>
+    <string name="permissions_open_settings">Abrir ajustes</string>
+    <string name="permissions_needs_precise_first">Primero concede la ubicación precisa.</string>
+    <string name="permissions_missing_required">Sin los permisos necesarios no se podrá iniciar el servicio. Puedes concederlos más tarde.</string>
+
+    <string name="why_precise_location">Para tomar la posición de este teléfono con GPS.</string>
+    <string name="why_background_location">Para reanudar el rastreo cuando el teléfono se reinicia. En la pantalla de Android elige «Permitir todo el tiempo».</string>
+    <string name="why_notifications_tracker">La notificación avisa en todo momento que la ubicación se está compartiendo.</string>
+    <string name="why_notifications_server">Para ver el estado del servidor en la barra de notificaciones.</string>
+    <string name="why_local_network_tracker">Para enviar la ubicación a un servidor en tu Wi-Fi.</string>
+    <string name="why_local_network_server">Para que los teléfonos de tu red puedan conectarse a este servidor.</string>
+    <string name="why_battery">Evita que Android detenga el servicio para ahorrar batería. Se cambia en los ajustes del sistema.</string>
+</resources>

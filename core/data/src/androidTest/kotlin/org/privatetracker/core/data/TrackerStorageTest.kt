@@ -18,15 +18,18 @@ import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.privatetracker.core.data.repository.DataStoreAppModeRepository
 import org.privatetracker.core.data.repository.DataStoreIdentityRepository
 import org.privatetracker.core.data.repository.DataStoreTrackerConfigRepository
 import org.privatetracker.core.data.repository.DataStoreTrackerStateRepository
 import org.privatetracker.core.data.repository.RoomOutboxRepository
 import org.privatetracker.core.database.TrackerDatabase
+import org.privatetracker.core.datastore.AppModeData
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.JsonSerializer
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
+import org.privatetracker.core.domain.model.AppMode
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.TrackerRegistration
 import org.privatetracker.core.domain.testing.DEVICE_A
@@ -120,6 +123,19 @@ class DataStoreRepositoriesTest {
         val reopened = DataStoreIdentityRepository(store(file, IdentityData.serializer(), IdentityData()))
 
         assertEquals(id, reopened.getOrCreate { DeviceId.of(UUID.randomUUID().toString()) })
+    }
+
+    @Test
+    fun theAppModeStartsUnsetAndSurvivesARestart() = runTest {
+        val file = tempFile()
+        val first = DataStoreAppModeRepository(store(file, AppModeData.serializer(), AppModeData()))
+        assertNull(first.get())
+        first.set(AppMode.TRACKER_AND_SERVER)
+        scopes.forEach { it.cancel() }
+
+        val reopened = DataStoreAppModeRepository(store(file, AppModeData.serializer(), AppModeData()))
+
+        assertEquals(AppMode.TRACKER_AND_SERVER, reopened.observe().first())
     }
 
     @Test

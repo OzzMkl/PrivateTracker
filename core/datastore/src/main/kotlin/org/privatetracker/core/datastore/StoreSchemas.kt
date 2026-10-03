@@ -17,6 +17,8 @@ data class TrackerConfigData(
     val maxQueueSize: Int = 10_000,
     val startOnBoot: Boolean = false,
     val trackingEnabled: Boolean = false,
+    val serverKey: String = "",
+    val serverAddresses: List<String> = emptyList(),
 )
 
 @Serializable
@@ -34,6 +36,10 @@ data class ServerConfigData(
 
 @Serializable
 data class IdentityData(val deviceId: String? = null)
+
+/** [mode] is an AppMode name; null until onboarding ends. */
+@Serializable
+data class AppModeData(val mode: String? = null)
 
 @Serializable
 data class TrackerStateData(

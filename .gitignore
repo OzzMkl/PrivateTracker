@@ -17,3 +17,6 @@ local.properties
 # Gradle / Kotlin build outputs in every module
 build/
 .kotlin/
+
+# Ledgers and server.db copies from simulator runs
+simulator-runs/

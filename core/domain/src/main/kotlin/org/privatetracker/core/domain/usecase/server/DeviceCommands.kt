@@ -4,6 +4,7 @@ import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.common.result.asSuccess
+import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.repository.DeviceRepository
@@ -22,6 +23,22 @@ class RenameDevice(
             Unit.asSuccess()
         }
     }
+}
+
+/**
+ * The owner's decision on a device. Rejecting keeps its history and refuses its requests; removing
+ * the device instead deletes everything, and it can then ask again.
+ */
+class SetDeviceApproval(
+    private val devices: DeviceRepository,
+    private val transaction: TransactionRunner,
+) {
+    suspend operator fun invoke(id: DeviceId, approval: DeviceApproval): Outcome<Unit> =
+        transaction.run<Outcome<Unit>> {
+            val device = devices.get(id) ?: return@run DomainError.DeviceNotFound.asFailure()
+            devices.update(device.copy(approval = approval))
+            Unit.asSuccess()
+        }
 }
 
 /** Forgets a device with its locations and sessions. */

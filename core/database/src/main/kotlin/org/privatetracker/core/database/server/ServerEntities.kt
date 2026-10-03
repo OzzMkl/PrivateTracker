@@ -27,6 +27,8 @@ data class DeviceEntity(
     @ColumnInfo(name = "last_seen_at") val lastSeenAt: Long?,
     /** Points at locations.id. No declared foreign key: locations already reference devices. */
     @ColumnInfo(name = "last_location_id") val lastLocationId: Long?,
+    /** PENDING, APPROVED or REJECTED. Devices from version 1 have no key, so they start over as PENDING. */
+    @ColumnInfo(name = "approval", defaultValue = "PENDING") val approval: String,
 )
 
 @Entity(

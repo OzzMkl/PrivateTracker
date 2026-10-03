@@ -2,6 +2,7 @@ package org.privatetracker.core.domain.usecase.tracker
 
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.common.result.map
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.TrackerRegistration
@@ -47,7 +48,8 @@ class UploadPendingLocations(
             if (pending.isEmpty()) return UploadResult.Completed(sent, rejected, hasMore = false)
             val attempted = pending.map { it.location.id }
 
-            when (val result = gateway.uploadLocations(config.serverUrl, deviceId, pending.map { it.location })) {
+            val serverKey = config.serverKey.ifBlank { null }
+            when (val result = gateway.uploadLocations(config.serverUrl, deviceId, pending.map { it.location }, serverKey)) {
                 is Outcome.Success -> {
                     val acknowledged = result.value.acknowledgedIds()
                     if (acknowledged.isEmpty()) {
@@ -86,7 +88,7 @@ class UploadPendingLocations(
 
     private suspend fun ensureRegistered(serverUrl: String): Outcome<TrackerRegistration> {
         val known = trackerState.registration()
-        return if (known != null && known.serverUrl == serverUrl) Outcome.Success(known) else registerDevice()
+        return if (known != null && known.serverUrl == serverUrl) Outcome.Success(known) else registerDevice().map { it.registration }
     }
 
     private suspend fun failure(error: DomainError, attempted: List<LocationId>): UploadResult {
@@ -101,6 +103,10 @@ class UploadPendingLocations(
     private fun DomainError.isTransient(): Boolean = when (this) {
         is DomainError.Network -> true
         is DomainError.Http -> status == 429 || status >= 500
+        // The owner may approve at any moment; until then the outbox keeps everything.
+        DomainError.DevicePendingApproval -> true
+        // Another server at the address, for now: the coordinator looks for ours at the other addresses.
+        DomainError.ServerIdentityMismatch -> true
         else -> false
     }
 

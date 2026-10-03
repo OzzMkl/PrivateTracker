@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="server_title">Servidor</string>
+    <string name="server_status">Estado</string>
+    <string name="server_stopped">Detenido</string>
+    <string name="server_starting">Iniciando…</string>
+    <string name="server_stopping">Deteniendo…</string>
+    <string name="server_running">Activo en el puerto %1$d</string>
+    <string name="server_failed">No pudo arrancar</string>
+    <string name="server_start">Iniciar servidor</string>
+    <string name="server_stop">Detener</string>
+    <string name="server_name">Nombre</string>
+    <string name="server_requests">Peticiones atendidas</string>
+    <string name="server_devices">Dispositivos registrados</string>
+    <string name="server_new_devices">Acepta dispositivos nuevos</string>
+    <string name="server_yes">Sí</string>
+    <string name="server_no">No</string>
+    <string name="server_open_permissions">Permisos</string>
+    <plurals name="server_pending">
+        <item quantity="one">%d teléfono espera tu aprobación</item>
+        <item quantity="many">%d teléfonos esperan tu aprobación</item>
+        <item quantity="other">%d teléfonos esperan tu aprobación</item>
+    </plurals>
+    <string name="server_review">Revisar</string>
+    <string name="server_key_fingerprint">Huella del servidor</string>
+    <string name="server_pair">Emparejar un teléfono</string>
+
+    <string name="server_pairing_title">Emparejar un teléfono</string>
+    <string name="server_pairing_scan_title">Escanea este código</string>
+    <string name="server_pairing_scan_body">En el otro teléfono, abre Rastreo y toca Escanear QR, o apúntale con la cámara. Quedará emparejado y aprobado sin escribir nada. El código sirve una sola vez.</string>
+    <string name="server_pairing_qr_description">Código QR para emparejar un teléfono</string>
+    <string name="server_pairing_expires_in">Vence en %1$d:%2$02d</string>
+    <string name="server_pairing_expired">El código venció. Genera otro.</string>
+    <string name="server_pairing_new_code">Nuevo código</string>
+    <string name="server_pairing_retry">Reintentar</string>
+    <string name="server_pairing_done">Emparejado: %1$s, huella %2$s. Ya puede enviar su ubicación.</string>
+    <string name="server_pairing_another">Emparejar otro</string>
+    <string name="server_pairing_close">Listo</string>
+
+    <string name="server_addresses">Direcciones para los Trackers</string>
+    <string name="server_addresses_hint">Escribe una de estas URL en los ajustes de cada teléfono que vaya a enviar su ubicación.</string>
+    <string name="server_addresses_none">Este teléfono no tiene ninguna red activa. Conéctalo a tu Wi-Fi o VPN.</string>
+    <string name="server_kind_lan">Red local</string>
+    <string name="server_kind_vpn">VPN</string>
+    <string name="server_kind_other">Otra red</string>
+    <string name="server_kind_loopback">Este teléfono</string>
+    <string name="server_copy">Copiar</string>
+    <string name="server_copied">URL copiada</string>
+    <string name="server_security_notice">Cada teléfono firma lo que envía y solo entra si lo emparejas o lo apruebas, pero las ubicaciones aún viajan sin cifrar: usa el servidor solo en tu Wi-Fi o en una VPN de confianza.</string>
+    <string name="server_power_hint">Para que el servidor no se detenga, mantén este teléfono conectado a la corriente.</string>
+
+    <!-- Notification. -->
+    <string name="server_channel">Servidor</string>
+    <string name="server_notification_title">Servidor PrivateTracker</string>
+    <string name="server_notification_starting">Iniciando…</string>
+    <string name="server_notification_running">Escuchando en el puerto %1$d</string>
+    <string name="server_notification_port_in_use" tools:ignore="PluralsCandidate">El puerto %1$d está ocupado</string>
+    <string name="server_notification_failed">No pudo arrancar</string>
+</resources>

@@ -16,6 +16,9 @@ enum class Platform {
     }
 }
 
+/** Whether the server's owner lets a device in. Only APPROVED devices can send locations. */
+enum class DeviceApproval { PENDING, APPROVED, REJECTED }
+
 /** A tracker as seen by the server. */
 data class Device(
     val id: DeviceId,
@@ -25,9 +28,16 @@ data class Device(
     val protocolVersion: Int,
     val createdAt: Instant,
     val lastSeenAt: Instant?,
-    /** Null in 0.1; holds the device key from 0.2 on. */
+    /** ECDSA P-256 key the device signs with, as Base64 X.509 SubjectPublicKeyInfo. Null for devices that 0.1 registered. */
     val publicKey: String? = null,
+    val approval: DeviceApproval = DeviceApproval.PENDING,
 ) {
+    /**
+     * Waiting for the owner's decision. A device without a key (registered by 0.1) is not: approving it
+     * would mean nothing, since its next registration brings a key and starts the approval over.
+     */
+    val awaitsApproval: Boolean get() = approval == DeviceApproval.PENDING && publicKey != null
+
     companion object {
         const val NAME_MAX_LENGTH = 64
     }
@@ -57,4 +67,9 @@ data class DeviceWithLastLocation(val device: Device, val lastLocation: Location
 
 data class DeviceOverview(val device: Device, val status: DeviceStatus, val lastLocation: Location?)
 
-data class DeviceDetail(val overview: DeviceOverview, val currentSession: DeviceSession?)
+data class DeviceDetail(
+    val overview: DeviceOverview,
+    val currentSession: DeviceSession?,
+    /** Newest first, the current one included. Only the app fills it; the read API leaves it empty. */
+    val recentSessions: List<DeviceSession> = emptyList(),
+)

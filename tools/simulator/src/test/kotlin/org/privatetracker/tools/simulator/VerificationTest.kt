@@ -1,0 +1,202 @@
+package org.privatetracker.tools.simulator
+
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.io.TempDir
+import org.privatetracker.core.domain.model.LocationBatchResult
+import org.privatetracker.core.domain.model.RejectedLocation
+import org.privatetracker.core.domain.model.RejectionReason
+import org.privatetracker.core.domain.testing.DEVICE_A
+import org.privatetracker.core.domain.testing.DEVICE_B
+import org.privatetracker.core.domain.testing.T0
+import org.privatetracker.core.domain.testing.aLocation
+import org.privatetracker.core.domain.testing.locationId
+import java.nio.file.Files
+import java.nio.file.Path
+import java.sql.DriverManager
+import java.time.Duration
+import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.nameWithoutExtension
+import kotlin.io.path.readText
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class VerificationTest {
+    @TempDir
+    lateinit var dir: Path
+
+    private fun key(n: Int, device: String = DEVICE_A.value) = LocationKey(device, locationId(n).value)
+
+    private fun record(n: Int, latitude: Double = 19.0 + n / 1000.0) = LocationRecord(key(n), 1_000L * n, latitude, -99.1)
+
+    private val fullDay = RunEnd(Duration.ofHours(24), stoppedEarly = false, drained = true)
+
+    /** A run of [count] locations, all acknowledged. */
+    private fun cleanRun(count: Int = 3, end: RunEnd? = fullDay) = LedgerContents(
+        devices = mapOf(DEVICE_A.value to "Simulador 01"),
+        generated = (1..count).associate { key(it) to record(it) },
+        acknowledged = (1..count).map(::key).toSet(),
+        rejected = emptyMap(),
+        dropped = emptySet(),
+        end = end,
+    )
+
+    @Test
+    fun `the ledger reads back what was written, coordinates bit for bit`() {
+        val location = aLocation(n = 1, latitude = 19.432612345678901, longitude = -99.13321098765432, recordedAt = T0.plusNanos(123_456_789))
+        Ledger.create(dir).use { ledger ->
+            ledger.device(DEVICE_A, "Simulador 01")
+            ledger.generated(location)
+            ledger.generated(aLocation(n = 2))
+            ledger.generated(aLocation(n = 3))
+            ledger.generated(aLocation(n = 4))
+            ledger.answered(
+                DEVICE_A,
+                LocationBatchResult(
+                    accepted = listOf(locationId(1)),
+                    duplicates = listOf(locationId(2)),
+                    rejected = listOf(RejectedLocation(locationId(3).value, RejectionReason.INVALID_FIELD, "bad, very bad")),
+                    serverTime = T0,
+                ),
+            )
+            ledger.dropped(listOf(aLocation(n = 4)))
+            ledger.finished(RunEnd(Duration.ofMinutes(5), stoppedEarly = true, drained = true))
+        }
+
+        val contents = Ledger.read(dir.resolve(Ledger.FILE_NAME))
+
+        assertEquals(mapOf(DEVICE_A.value to "Simulador 01"), contents.devices)
+        assertEquals(
+            LocationRecord(key(1), T0.toEpochMilli() + 123, 19.432612345678901, -99.13321098765432),
+            contents.generated.getValue(key(1)),
+        )
+        assertEquals(setOf(key(1), key(2)), contents.acknowledged)
+        assertEquals(mapOf(key(3) to "INVALID_FIELD: bad  very bad"), contents.rejected)
+        assertEquals(setOf(key(4)), contents.dropped)
+        assertEquals(RunEnd(Duration.ofMinutes(5), stoppedEarly = true, drained = true), contents.end)
+    }
+
+    @Test
+    fun `a new run never appends to an old ledger`() {
+        Ledger.create(dir).close()
+        assertFailsWith<UsageException> { Ledger.create(dir) }
+    }
+
+    @Test
+    fun `a cut-off last line is ignored, a broken line in the middle is not`() {
+        val file = dir.resolve(Ledger.FILE_NAME)
+        val header = "event,device_id,location_id,recorded_at_ms,latitude,longitude,detail"
+        val generated = "generated,${DEVICE_A.value},${locationId(1).value},1000,19.0,-99.0,"
+        Files.writeString(file, "$header\n$generated\ngenerated,${DEVICE_A.value},${locationId(2).value},20")
+        assertEquals(1, Ledger.read(file).generated.size)
+
+        Files.writeString(file, "$header\nnonsense\n$generated\n")
+        assertFailsWith<UsageException> { Ledger.read(file) }
+    }
+
+    @Test
+    fun `every generated location lands in exactly one bucket`() {
+        val contents = LedgerContents(
+            devices = mapOf(DEVICE_A.value to "Simulador 01"),
+            generated = (1..6).associate { key(it) to record(it) },
+            acknowledged = setOf(key(1), key(2), key(3)),
+            rejected = mapOf(key(4) to "TIMESTAMP_IN_FUTURE: too far"),
+            dropped = setOf(key(5)),
+            end = fullDay,
+        )
+        val stored = listOf(
+            record(1),
+            record(2, latitude = 0.0),
+            // Never generated by this run.
+            record(7),
+        )
+
+        val report = Verifier.verify(contents, ServerSnapshot { stored })
+
+        assertEquals(1, report.delivered)
+        assertEquals(listOf(key(2)), report.altered)
+        assertEquals(listOf(key(3)), report.lost)
+        assertEquals(listOf(key(4)), report.rejected.keys.toList())
+        assertEquals(listOf(key(5)), report.dropped)
+        assertEquals(listOf(key(6)), report.undelivered)
+        assertEquals(listOf(key(7)), report.unexpected)
+        assertFalse(report.passed)
+        assertTrue("NO APROBADA" in Verifier.format(report))
+    }
+
+    @Test
+    fun `a closed run whose every location is stored once and unchanged passes`() {
+        val report = Verifier.verify(cleanRun(), ServerSnapshot { (1..3).map(::record) })
+
+        assertTrue(report.passed)
+        assertEquals(3, report.delivered)
+        assertTrue("APROBADA" in Verifier.format(report))
+    }
+
+    @Test
+    fun `a location stored twice fails even though nothing is missing`() {
+        val report = Verifier.verify(cleanRun(), ServerSnapshot { (1..3).map(::record) + record(2) })
+
+        assertEquals(listOf(key(2)), report.repeated)
+        assertFalse(report.passed)
+    }
+
+    @Test
+    fun `a run the simulator never closed, or that generated nothing, does not pass`() {
+        val unclosed = Verifier.verify(cleanRun(end = null), ServerSnapshot { (1..3).map(::record) })
+        assertTrue(unclosed.noLosses)
+        assertFalse(unclosed.passed)
+        assertTrue("INCOMPLETA" in Verifier.format(unclosed))
+
+        val empty = Verifier.verify(cleanRun(count = 0), ServerSnapshot { emptyList() })
+        assertFalse(empty.passed)
+    }
+
+    @Test
+    fun `server db reader returns the locations of the asked devices from Room's own schema`() {
+        val db = dir.resolve("server.db")
+        DriverManager.getConnection("jdbc:sqlite:$db").use { connection ->
+            connection.createStatement().use { statement ->
+                latestServerSchema().forEach(statement::execute)
+                statement.execute(
+                    "INSERT INTO devices (id, device_uid, name, platform, protocol_version, created_at) VALUES " +
+                        "(1, '${DEVICE_A.value}', 'A', 'OTHER', 1, 0), (2, '${DEVICE_B.value}', 'B', 'OTHER', 1, 0)",
+                )
+                statement.execute(
+                    "INSERT INTO locations (client_id, device_id, latitude, longitude, recorded_at, received_at) VALUES " +
+                        "('${locationId(1).value}', 1, 19.432612345678901, -99.13321098765432, 1000, 2000), " +
+                        "('${locationId(2).value}', 1, 19.5, -99.2, 3000, 4000), " +
+                        "('${locationId(3).value}', 2, 20.0, -100.0, 5000, 6000)",
+                )
+            }
+        }
+
+        val rows = SqliteServerSnapshot(db).locationsOf(setOf(DEVICE_A.value))
+
+        assertEquals(
+            setOf(
+                LocationRecord(key(1), 1000, 19.432612345678901, -99.13321098765432),
+                LocationRecord(key(2), 3000, 19.5, -99.2),
+            ),
+            rows.toSet(),
+        )
+    }
+
+    /** CREATE statements of the newest server.db schema exported by Room. */
+    private fun latestServerSchema(): List<String> {
+        val schemas = Path.of(System.getProperty("serverSchemas"))
+        val latest = schemas.listDirectoryEntries("*.json").maxBy { it.nameWithoutExtension.toInt() }
+        val database = Json.parseToJsonElement(latest.readText()).jsonObject.getValue("database").jsonObject
+        return database.getValue("entities").jsonArray.flatMap { entity ->
+            val table = entity.jsonObject.getValue("tableName").jsonPrimitive.content
+            val create = entity.jsonObject.getValue("createSql").jsonPrimitive.content
+            val indices = entity.jsonObject["indices"]?.jsonArray.orEmpty().map { it.jsonObject.getValue("createSql").jsonPrimitive.content }
+            (listOf(create) + indices).map { it.replace("\${TABLE_NAME}", table) }
+        }
+    }
+}

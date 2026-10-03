@@ -10,6 +10,7 @@ import org.privatetracker.core.datastore.RegistrationData
 import org.privatetracker.core.datastore.ServerConfigData
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.domain.model.Device
+import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceSession
 import org.privatetracker.core.domain.model.DeviceWithLastLocation
@@ -41,6 +42,8 @@ internal fun DeviceEntity.toDomain() = Device(
     createdAt = createdAt.toInstant(),
     lastSeenAt = lastSeenAt?.toInstant(),
     publicKey = publicKey,
+    // An unknown value can only come from a newer app version; refusing the device is the safe reading.
+    approval = DeviceApproval.entries.firstOrNull { it.name == approval } ?: DeviceApproval.REJECTED,
 )
 
 internal fun Device.toEntity() = DeviceEntity(
@@ -53,6 +56,7 @@ internal fun Device.toEntity() = DeviceEntity(
     createdAt = createdAt.millis(),
     lastSeenAt = lastSeenAt?.millis(),
     lastLocationId = null,
+    approval = approval.name,
 )
 
 internal fun LocationEntity.toDomain(deviceUid: String) = Location(
@@ -153,6 +157,8 @@ internal fun TrackerConfigData.toDomain() = TrackerConfig(
     maxQueueSize = maxQueueSize,
     startOnBoot = startOnBoot,
     trackingEnabled = trackingEnabled,
+    serverKey = serverKey,
+    serverAddresses = serverAddresses,
 )
 
 internal fun TrackerConfig.toData() = TrackerConfigData(
@@ -166,6 +172,8 @@ internal fun TrackerConfig.toData() = TrackerConfigData(
     maxQueueSize = maxQueueSize,
     startOnBoot = startOnBoot,
     trackingEnabled = trackingEnabled,
+    serverKey = serverKey,
+    serverAddresses = serverAddresses,
 )
 
 internal fun ServerConfigData.toDomain() = ServerConfig(

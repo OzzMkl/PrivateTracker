@@ -1,15 +1,22 @@
 package org.privatetracker.core.domain.port
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.domain.model.AppPermission
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationFix
 import org.privatetracker.core.domain.model.LocationPriority
+import org.privatetracker.core.domain.model.NetworkAddress
 import org.privatetracker.core.domain.model.RegistrationResult
+import org.privatetracker.core.domain.model.ServerActivity
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.TrackerActivity
+import java.time.Duration
+import java.time.Instant
 
 /** Runs [run]'s block atomically: all repository writes inside it commit together or not at all. */
 interface TransactionRunner {
@@ -21,13 +28,58 @@ interface TransactionRunner {
  * so they come back as [Outcome.Failure] instead of exceptions.
  */
 interface ServerGateway {
-    suspend fun health(serverUrl: String): Outcome<ServerInfo>
+    /** With a [challenge], the server signs it with its own key; see [org.privatetracker.core.domain.model.ServerIdentity]. */
+    suspend fun health(serverUrl: String, challenge: String? = null): Outcome<ServerInfo>
     suspend fun register(serverUrl: String, registration: DeviceRegistration): Outcome<RegistrationResult>
+
+    /**
+     * With the [serverKey] this tracker pinned, the answer only counts if the server signed it with
+     * that key; anything else is [org.privatetracker.core.common.result.DomainError.ServerIdentityMismatch].
+     */
     suspend fun uploadLocations(
         serverUrl: String,
         deviceId: DeviceId,
         locations: List<Location>,
+        serverKey: String? = null,
     ): Outcome<LocationBatchResult>
+}
+
+/**
+ * The tracker's signing keys, one per device id, so a new identity always comes with a new key.
+ * Private keys never leave the store; on Android they live in the Keystore. Both methods throw
+ * [DeviceKeyException] when the store fails.
+ */
+interface DeviceKeys {
+    /** The public key of [deviceId], created on first use: ECDSA P-256, Base64 X.509 SubjectPublicKeyInfo. */
+    suspend fun publicKey(deviceId: DeviceId): String
+
+    /** SHA256withECDSA signature of [data], DER encoded. */
+    suspend fun sign(deviceId: DeviceId, data: ByteArray): ByteArray
+}
+
+class DeviceKeyException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * The server's own identity key, ECDSA P-256 like the device keys. Trackers pin it when they pair, so
+ * they can tell their server from any other at the same address. Throws [DeviceKeyException] on failure.
+ */
+interface ServerKeys {
+    suspend fun publicKey(): String
+    suspend fun sign(data: ByteArray): ByteArray
+}
+
+/** Server-side checks of the keys and signatures trackers send. */
+interface SignatureVerifier {
+    /** True when [publicKey] is a well-formed key of the algorithm the protocol uses. */
+    fun isValidKey(publicKey: String): Boolean
+
+    fun verify(publicKey: String, data: ByteArray, signature: ByteArray): Boolean
+}
+
+/** Nonces of recently accepted requests, so a captured request cannot be sent again. */
+fun interface NonceRegistry {
+    /** Remembers [nonce] of [deviceId] until [expiresAt]. False when it was already seen: a replay. */
+    fun register(deviceId: DeviceId, nonce: String, expiresAt: Instant): Boolean
 }
 
 data class LocationRequestSpec(
@@ -44,4 +96,37 @@ interface LocationSource {
 fun interface BatteryLevelProvider {
     /** Battery level from 0 to 100, or null when unknown. */
     fun currentLevelPct(): Int?
+}
+
+interface PermissionChecker {
+    /** False when this Android version has no such permission; it then needs no grant. */
+    fun isApplicable(permission: AppPermission): Boolean
+    fun isGranted(permission: AppPermission): Boolean
+}
+
+/**
+ * Starts and stops the tracking service. Android allows the start only while the app is visible
+ * or right after boot; [activity] is what the running service reports.
+ */
+interface TrackingController {
+    val activity: StateFlow<TrackerActivity>
+    fun start()
+    fun stop()
+}
+
+/** Starts and stops the server service, under the same restrictions as [TrackingController]. */
+interface ServerController {
+    val activity: StateFlow<ServerActivity>
+    fun start()
+    fun stop()
+}
+
+/** Uploads that must happen even if the app dies, once the network allows. */
+fun interface UploadScheduler {
+    fun scheduleUpload(delay: Duration)
+}
+
+interface NetworkInfoProvider {
+    /** The addresses of the interfaces that are up, again whenever the networks change. */
+    fun observeAddresses(): Flow<List<NetworkAddress>>
 }

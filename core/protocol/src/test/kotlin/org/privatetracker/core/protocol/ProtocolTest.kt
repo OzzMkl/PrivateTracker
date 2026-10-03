@@ -3,9 +3,12 @@ package org.privatetracker.core.protocol
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.FieldViolation
+import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.LocationBatchResult
+import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
 import org.privatetracker.core.domain.testing.DEVICE_A
@@ -25,6 +28,7 @@ import org.privatetracker.core.protocol.v1.dto.LocationBatchRequest
 import org.privatetracker.core.protocol.v1.dto.LocationDto
 import org.privatetracker.core.protocol.v1.dto.ProblemDetails
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceRequest
+import org.privatetracker.core.protocol.v1.dto.RegisterDeviceResponse
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -111,6 +115,19 @@ class MappingTest {
     @Test
     fun `registration and batch results map both ways`() {
         assertEquals(aRegistration(), aRegistration().toDto().toDomain().successValue())
+        // A 0.1 tracker sends no key: it learns why instead of getting a generic error.
+        assertEquals(
+            DomainError.Validation("public_key", FieldViolation.REQUIRED),
+            aRegistration().toDto().copy(publicKey = null).toDomain().failureError(),
+        )
+        val registered = RegistrationResult(DEVICE_A, true, 100, T0, DeviceApproval.PENDING)
+        assertEquals(registered, registered.toDto().toDomain().successValue())
+        // A 0.1 server sends no approval, and lets every device in.
+        val fromOldServer = ProtocolJson.decodeFromString(
+            RegisterDeviceResponse.serializer(),
+            """{"device_id":"${DEVICE_A.value}","created":true,"max_batch_size":100,"server_time":"2026-10-02T18:00:00Z"}""",
+        )
+        assertEquals(DeviceApproval.APPROVED, fromOldServer.toDomain().successValue().approval)
 
         val result = LocationBatchResult(
             accepted = listOf(locationId(1)),
@@ -130,5 +147,11 @@ class MappingTest {
         assertEquals(DomainError.BatchTooLarge(50), problem(ErrorCode.BATCH_TOO_LARGE, 50).toDomainError(413, null))
         assertEquals(DomainError.Http(429, "RATE_LIMITED", 30), problem(ErrorCode.RATE_LIMITED).toDomainError(429, 30))
         assertEquals(DomainError.Http(502), null.toDomainError(502, null))
+        assertEquals(DomainError.DevicePendingApproval, problem(ErrorCode.DEVICE_PENDING_APPROVAL).toDomainError(403, null))
+        assertEquals(DomainError.DeviceRejected, problem(ErrorCode.DEVICE_REJECTED).toDomainError(403, null))
+        AuthFailure.entries.forEach { reason ->
+            val code = ErrorCode.valueOf(reason.code)
+            assertEquals(DomainError.AuthenticationFailed(reason), problem(code).toDomainError(401, null))
+        }
     }
 }

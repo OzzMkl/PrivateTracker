@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="tracker_title">Rastreo</string>
+    <string name="tracker_status">Estado</string>
+    <string name="tracker_running">Compartiendo ubicación</string>
+    <string name="tracker_stopped">Detenido</string>
+    <string name="tracker_enabled_not_running">Activado, pero detenido</string>
+    <string name="tracker_start">Iniciar rastreo</string>
+    <string name="tracker_stop">Detener</string>
+    <string name="tracker_server">Servidor</string>
+    <string name="tracker_device_name">Este dispositivo</string>
+    <string name="tracker_interval">Intervalo</string>
+    <string name="tracker_interval_value">Cada %1$d s</string>
+    <string name="tracker_not_configured">Empareja este teléfono con un servidor: escanea el código que muestra, o escribe su URL en Ajustes.</string>
+    <string name="tracker_open_settings">Ajustes</string>
+    <string name="tracker_open_permissions">Permisos</string>
+    <string name="tracker_scan_qr">Escanear QR</string>
+    <string name="tracker_server_fingerprint">Huella del servidor</string>
+
+    <string name="tracker_pairing_title">Emparejar con un servidor</string>
+    <string name="tracker_pairing_scan_title">Escanea el código del servidor</string>
+    <string name="tracker_pairing_scan_body">En el teléfono servidor, abre Servidor y toca Emparejar un teléfono. Apunta la cámara al código que aparece.</string>
+    <string name="tracker_pairing_allow_camera">Permitir la cámara</string>
+    <string name="tracker_pairing_camera_denied">Sin permiso de cámara no se puede escanear. Concédelo en los ajustes del sistema, o abre el código con la app de cámara del teléfono.</string>
+    <string name="tracker_pairing_open_app_settings">Ajustes del sistema</string>
+    <string name="tracker_pairing_foreign_code">Ese código no es de PrivateTracker. Escanea el que muestra el servidor.</string>
+    <string name="tracker_pairing_confirm_title">¿Emparejar con «%1$s»?</string>
+    <string name="tracker_pairing_confirm_body">Este teléfono enviará su ubicación a ese servidor. El código lo aprueba sin más pasos.</string>
+    <string name="tracker_pairing_server_fingerprint">Huella del servidor</string>
+    <string name="tracker_pairing_addresses">Direcciones</string>
+    <plurals name="tracker_pairing_address_count">
+        <item quantity="one">%d dirección</item>
+        <item quantity="many">%d direcciones</item>
+        <item quantity="other">%d direcciones</item>
+    </plurals>
+    <string name="tracker_pairing_cancel">Cancelar</string>
+    <string name="tracker_pairing_confirm">Emparejar</string>
+    <string name="tracker_pairing_working">Buscando al servidor y comprobando su clave…</string>
+    <string name="tracker_pairing_done">Emparejado con «%1$s» en %2$s. Ya puedes iniciar el rastreo.</string>
+    <string name="tracker_pairing_finish">Ir a Rastreo</string>
+    <string name="tracker_pairing_scan_again">Escanear otra vez</string>
+    <string name="tracker_pairing_replaces">Este teléfono ya envía su ubicación a %1$s (huella %2$s). Si continúas, dejará de hacerlo y enviará a «%3$s» todo lo que tenga en cola. Hazlo solo si el código lo muestra tu servidor.</string>
+    <string name="tracker_pairing_network_hint">¿Están ambos teléfonos en la misma Wi-Fi o VPN? En Android 17, este teléfono necesita además el acceso a la red local.</string>
+
+    <string name="tracker_waiting_approval">El servidor guarda la solicitud de este teléfono hasta que su dueño la apruebe. Pídele que compare la huella %1$s en Dispositivos. Mientras tanto, las posiciones esperan en la cola.</string>
+
+    <string name="tracker_last_location">Última ubicación</string>
+    <string name="tracker_no_fix_yet">Esperando la primera ubicación…</string>
+    <string name="tracker_coordinates">Coordenadas</string>
+    <string name="tracker_accuracy">Precisión</string>
+    <string name="tracker_recorded">Tomada</string>
+    <string name="tracker_provider">Fuente</string>
+    <string name="tracker_mock">Ubicación simulada</string>
+    <string name="tracker_skipped_low_accuracy">Última lectura descartada: poca precisión</string>
+    <string name="tracker_skipped_too_close">Última lectura descartada: muy cerca de la anterior</string>
+    <string name="tracker_skipped_invalid">Última lectura descartada: datos no válidos</string>
+
+    <string name="tracker_queue">Envío al servidor</string>
+    <string name="tracker_queue_size">En cola</string>
+    <string name="tracker_queue_value">%1$d de %2$d</string>
+    <string name="tracker_queue_nearly_full">La cola está casi llena. Si se llena, se borran las posiciones más antiguas.</string>
+    <string name="tracker_last_upload">Último envío</string>
+    <string name="tracker_upload_never">Aún no se ha enviado nada</string>
+    <string name="tracker_upload_completed">%1$s, %2$s</string>
+    <string name="tracker_upload_completed_rejected">%1$s, %2$s, %3$s</string>
+    <plurals name="tracker_upload_sent">
+        <item quantity="one">%d enviada</item>
+        <item quantity="many">%d enviadas</item>
+        <item quantity="other">%d enviadas</item>
+    </plurals>
+    <plurals name="tracker_upload_rejected">
+        <item quantity="one">%d rechazada</item>
+        <item quantity="many">%d rechazadas</item>
+        <item quantity="other">%d rechazadas</item>
+    </plurals>
+    <string name="tracker_upload_retry">Se reintentará: %1$s</string>
+    <string name="tracker_upload_blocked">Detenido: %1$s</string>
+
+    <!-- Notification. -->
+    <string name="tracker_channel">Rastreo de ubicación</string>
+    <string name="tracker_notification_title">Compartiendo tu ubicación</string>
+    <string name="tracker_notification_waiting">Esperando la primera ubicación…</string>
+    <string name="tracker_notification_last">Última ubicación a las %1$s</string>
+</resources>

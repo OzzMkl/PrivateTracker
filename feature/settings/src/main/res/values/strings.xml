@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_save">Guardar</string>
+    <string name="settings_saved">Ajustes guardados</string>
+    <string name="settings_cancel">Cancelar</string>
+
+    <string name="settings_mode">Modo</string>
+    <string name="settings_mode_change">Cambiar modo</string>
+    <string name="settings_mode_change_body">Al quitar un rol se detiene su servicio.</string>
+    <string name="mode_tracker">Compartir mi ubicación</string>
+    <string name="mode_tracker_body">Este teléfono envía su posición a un servidor tuyo.</string>
+    <string name="mode_server">Recibir ubicaciones</string>
+    <string name="mode_server_body">Este teléfono guarda las posiciones de tus dispositivos y las muestra en un mapa.</string>
+    <string name="mode_both">Ambas cosas</string>
+    <string name="mode_both_body">Este teléfono es el servidor y además comparte su propia ubicación.</string>
+
+    <string name="settings_permissions">Permisos</string>
+    <string name="settings_permissions_body">Revisa qué permisos faltan y para qué sirve cada uno.</string>
+    <string name="settings_permissions_open">Revisar permisos</string>
+
+    <string name="settings_tracker">Rastreo</string>
+    <string name="tracker_pair_qr">Emparejar con QR</string>
+    <string name="tracker_pair_qr_hint">Escanea el código que muestra el servidor: llena la dirección y aprueba este teléfono sin escribir nada. También puedes escribir la URL a mano.</string>
+    <string name="tracker_server_url">URL del servidor</string>
+    <string name="tracker_server_url_hint">Por ejemplo http://192.168.1.10:8787</string>
+    <string name="settings_tracker_device_name">Nombre de este dispositivo</string>
+    <string name="settings_tracker_interval">Intervalo (segundos)</string>
+    <string name="tracker_min_distance">Distancia mínima (metros)</string>
+    <string name="tracker_max_accuracy">Error máximo aceptado (metros)</string>
+    <string name="tracker_priority">Precisión del GPS</string>
+    <string name="priority_high">Alta</string>
+    <string name="priority_balanced">Media</string>
+    <string name="priority_low">Baja</string>
+    <string name="tracker_start_on_boot">Reanudar al encender el teléfono</string>
+    <string name="tracker_start_on_boot_body">Necesita ubicación «todo el tiempo».</string>
+    <string name="tracker_batch_size">Posiciones por envío</string>
+    <string name="tracker_max_queue">Máximo en cola</string>
+    <string name="tracker_test">Probar conexión</string>
+    <string name="tracker_testing">Probando…</string>
+    <string name="tracker_test_ok">Conectado a «%1$s» en %2$d ms</string>
+    <string name="tracker_test_incompatible">El servidor «%1$s» usa otra versión del protocolo (%2$d).</string>
+    <string name="tracker_test_clock">El reloj del servidor difiere %1$d s del de este teléfono.</string>
+    <string name="tracker_test_local_network">Si el servidor está en tu Wi-Fi, concede el acceso a la red local.</string>
+
+    <string name="settings_server">Servidor</string>
+    <string name="settings_server_name">Nombre del servidor</string>
+    <string name="server_port">Puerto</string>
+    <string name="server_bind_address">Interfaz (0.0.0.0 = todas)</string>
+    <string name="server_auto_start">Iniciar al encender el teléfono</string>
+    <string name="server_accept_new">Aceptar dispositivos nuevos</string>
+    <string name="server_accept_new_body">Los teléfonos nuevos quedan pendientes hasta que los apruebes. Apágalo para que ni siquiera puedan pedirlo.</string>
+    <string name="server_online_threshold">Inactivo tras (segundos)</string>
+    <string name="server_retention">Conservar posiciones (días)</string>
+    <string name="server_max_batch">Máximo por envío</string>
+    <string name="server_expose_read">Permitir consultas desde la red</string>
+    <string name="server_expose_read_body">Cualquiera en tu red podría ver las ubicaciones. Déjalo apagado salvo que lo necesites.</string>
+    <string name="server_restart_needed">El cambio de puerto o interfaz se aplica al reiniciar el servidor.</string>
+    <string name="server_restart">Reiniciar</string>
+
+    <string name="settings_about">Acerca de</string>
+    <string name="about_version">Versión</string>
+    <string name="about_protocol">Protocolo</string>
+    <string name="about_map_data">Datos del mapa</string>
+</resources>

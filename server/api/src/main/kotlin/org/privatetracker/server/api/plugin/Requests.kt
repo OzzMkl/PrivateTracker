@@ -22,24 +22,29 @@ import kotlin.time.Duration.Companion.minutes
 
 internal val DEVICE_RATE_LIMIT = RateLimitName("device")
 
-/** Per device on device routes, per remote address on registration. */
+/** Per remote address and device; registration has no device in its path, so it counts per address. */
 internal fun Application.installRateLimiting(requestsPerMinute: Int) {
     install(RateLimit) {
         register(DEVICE_RATE_LIMIT) {
             rateLimiter(limit = requestsPerMinute, refillPeriod = 1.minutes)
-            requestKey { call -> call.parameters[ApiV1.DEVICE_ID_PARAM] ?: call.request.local.remoteAddress }
+            requestKey { call -> rateLimitKey(call.request.local.remoteAddress, call.parameters[ApiV1.DEVICE_ID_PARAM]) }
         }
     }
 }
 
 /**
- * Reads a JSON body of at most [maxBytes]. Checks the declared length first and then the bytes
- * actually read, so a chunked request cannot get around the limit.
+ * The limit is charged before the signature is checked, so it must not be keyed on the device alone:
+ * anyone could then use up a real tracker's budget with unsigned requests from another address.
  */
-internal suspend fun <T> ApplicationCall.receiveJson(
-    deserializer: DeserializationStrategy<T>,
-    maxBytes: Int = ApiV1.MAX_BODY_BYTES,
-): T {
+internal fun rateLimitKey(remoteAddress: String, deviceIdParam: String?): String =
+    remoteAddress + "|" + deviceIdParam?.lowercase().orEmpty()
+
+/**
+ * Reads a JSON body of at most [maxBytes] as raw bytes, which is what a request signature covers.
+ * Checks the declared length first and then the bytes actually read, so a chunked request cannot
+ * get around the limit.
+ */
+internal suspend fun ApplicationCall.receiveJsonBytes(maxBytes: Int = ApiV1.MAX_BODY_BYTES): ByteArray {
     if (!request.contentType().match(ContentType.Application.Json)) {
         throw ApiException(HttpStatusCode.UnsupportedMediaType, ErrorCode.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json")
     }
@@ -48,15 +53,17 @@ internal suspend fun <T> ApplicationCall.receiveJson(
 
     val bytes = receiveChannel().readBuffer(maxBytes + 1L).readByteArray()
     if (bytes.size > maxBytes) throw bodyTooLarge(maxBytes)
+    return bytes
+}
 
-    return try {
+internal fun <T> decodeJson(deserializer: DeserializationStrategy<T>, bytes: ByteArray): T =
+    try {
         ProtocolJson.decodeFromString(deserializer, bytes.decodeToString())
     } catch (e: SerializationException) {
         throw ApiException(HttpStatusCode.BadRequest, ErrorCode.MALFORMED_JSON, e.message?.lineSequence()?.firstOrNull())
     } catch (e: IllegalArgumentException) {
         throw ApiException(HttpStatusCode.BadRequest, ErrorCode.MALFORMED_JSON, e.message?.lineSequence()?.firstOrNull())
     }
-}
 
 private fun bodyTooLarge(maxBytes: Int) =
     ApiException(HttpStatusCode.PayloadTooLarge, ErrorCode.BATCH_TOO_LARGE, "Body larger than $maxBytes bytes")

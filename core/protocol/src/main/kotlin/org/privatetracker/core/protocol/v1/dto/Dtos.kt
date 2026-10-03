@@ -12,6 +12,9 @@ data class HealthResponse(
     @SerialName("server_version") val serverVersion: String,
     @SerialName("protocol_version") val protocolVersion: Int,
     @SerialName("server_time") val serverTime: String,
+    /** From 0.3, when the request carried a challenge: the server's key and its signature over the challenge. */
+    @SerialName("server_key") val serverKey: String? = null,
+    val signature: String? = null,
 )
 
 @Serializable
@@ -21,7 +24,14 @@ data class RegisterDeviceRequest(
     val platform: String,
     @SerialName("app_version") val appVersion: String? = null,
     @SerialName("protocol_version") val protocolVersion: Int,
+    /** Required from 0.2 on; optional on the wire so a 0.1 tracker gets a clear validation error. */
+    @SerialName("public_key") val publicKey: String? = null,
+    /** From 0.3, when the tracker registers from a QR invite. */
+    val pairing: PairingClaimDto? = null,
 )
+
+@Serializable
+data class PairingClaimDto(val ticket: String, val proof: String)
 
 @Serializable
 data class RegisterDeviceResponse(
@@ -29,6 +39,8 @@ data class RegisterDeviceResponse(
     val created: Boolean,
     @SerialName("max_batch_size") val maxBatchSize: Int,
     @SerialName("server_time") val serverTime: String,
+    /** PENDING, APPROVED or REJECTED. A 0.1 server sends none and lets every device in. */
+    val approval: String = "APPROVED",
 )
 
 @Serializable
@@ -65,6 +77,7 @@ data class DeviceSummaryDto(
     @SerialName("device_id") val deviceId: String,
     val name: String,
     val status: String,
+    val approval: String? = null,
     @SerialName("last_seen_at") val lastSeenAt: String? = null,
     @SerialName("last_location") val lastLocation: LocationDto? = null,
 )
@@ -85,6 +98,8 @@ data class DeviceDetailDto(
     val name: String,
     val platform: String,
     val status: String,
+    val approval: String? = null,
+    @SerialName("key_fingerprint") val keyFingerprint: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("app_version") val appVersion: String? = null,
     @SerialName("last_seen_at") val lastSeenAt: String? = null,

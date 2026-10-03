@@ -12,6 +12,8 @@ object ApiV1 {
     const val REGISTER = "$BASE_PATH/devices/register"
     const val DEVICES = "$BASE_PATH/devices"
     const val DEVICE_ID_PARAM = "device_id"
+    /** Query parameter of [HEALTH]: a random challenge the server signs with its key. */
+    const val CHALLENGE_PARAM = "challenge"
     const val DEVICE = "$DEVICES/{$DEVICE_ID_PARAM}"
     const val LOCATIONS = "$DEVICE/locations"
 
@@ -45,7 +47,20 @@ enum class ErrorCode {
     UNSUPPORTED_MEDIA_TYPE,
     RATE_LIMITED,
     INTERNAL_ERROR,
-    SHUTTING_DOWN;
+    SHUTTING_DOWN,
+
+    // Request signatures, from 0.2 on. Each name equals the AuthFailure code it reports.
+    SIGNATURE_MISSING,
+    SIGNATURE_MALFORMED,
+    SIGNATURE_EXPIRED,
+    SIGNATURE_REPLAYED,
+    SIGNATURE_INVALID,
+    KEY_MISMATCH,
+    DEVICE_PENDING_APPROVAL,
+    DEVICE_REJECTED,
+
+    // QR pairing, from 0.3 on.
+    PAIRING_INVALID;
 
     /** RFC 9457 `type`: a URN, since the project owns no domain to host problem pages. */
     val problemType: String get() = "urn:privatetracker:problem:" + name.lowercase().replace('_', '-')

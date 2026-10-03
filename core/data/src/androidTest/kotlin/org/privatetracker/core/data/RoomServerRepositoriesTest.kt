@@ -20,6 +20,8 @@ import org.privatetracker.core.data.repository.RoomLocationRepository
 import org.privatetracker.core.data.repository.RoomSessionRepository
 import org.privatetracker.core.data.repository.RoomTransactionRunner
 import org.privatetracker.core.database.ServerDatabase
+import org.privatetracker.core.domain.model.DeviceApproval
+import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.DeviceWithLastLocation
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.SessionEndReason
@@ -27,12 +29,17 @@ import org.privatetracker.core.domain.service.SessionTracker
 import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.DEVICE_B
 import org.privatetracker.core.domain.testing.FakeClock
+import org.privatetracker.core.domain.testing.FakeSignatureVerifier
+import org.privatetracker.core.domain.testing.InMemoryNonces
+import org.privatetracker.core.domain.testing.InMemoryPairingTickets
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.SequentialIdGenerator
 import org.privatetracker.core.domain.testing.T0
 import org.privatetracker.core.domain.testing.aLocation
 import org.privatetracker.core.domain.testing.aRegistration
+import org.privatetracker.core.domain.testing.aSignedRequest
 import org.privatetracker.core.domain.testing.failureError
+import org.privatetracker.core.domain.testing.fakePublicKey
 import org.privatetracker.core.domain.testing.locationId
 import org.privatetracker.core.domain.testing.successValue
 import org.privatetracker.core.domain.usecase.server.CloseInactiveSessions
@@ -40,6 +47,8 @@ import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
 import org.privatetracker.core.domain.usecase.server.PurgeExpiredLocations
 import org.privatetracker.core.domain.usecase.server.RegisterOrUpdateDevice
 import org.privatetracker.core.domain.usecase.server.RemoveDevice
+import org.privatetracker.core.domain.usecase.server.SetDeviceApproval
+import org.privatetracker.core.domain.usecase.server.VerifyRequestSignature
 import org.privatetracker.core.domain.validation.LocationValidator
 import java.time.Duration
 
@@ -49,7 +58,8 @@ class RoomServerRepositoriesTest {
     private lateinit var database: ServerDatabase
     private lateinit var devices: RoomDeviceRepository
     private lateinit var sessions: RoomSessionRepository
-    private lateinit var register: RegisterOrUpdateDevice
+    private lateinit var registerDevice: RegisterOrUpdateDevice
+    private lateinit var setApproval: SetDeviceApproval
     private lateinit var ingest: IngestLocationBatch
     private lateinit var purge: PurgeExpiredLocations
     private lateinit var closeInactive: CloseInactiveSessions
@@ -66,7 +76,11 @@ class RoomServerRepositoriesTest {
         val locations = RoomLocationRepository(database.locations(), database.devices(), database.sessions())
         val transactions = RoomTransactionRunner(database)
         val sessionTracker = SessionTracker(sessions, SequentialIdGenerator())
-        register = RegisterOrUpdateDevice(devices, config, sessionTracker, transactions, clock)
+        val verifySignature = VerifyRequestSignature(FakeSignatureVerifier, InMemoryNonces(), clock)
+        registerDevice = RegisterOrUpdateDevice(
+            devices, config, sessionTracker, FakeSignatureVerifier, verifySignature, InMemoryPairingTickets(), transactions, clock,
+        )
+        setApproval = SetDeviceApproval(devices, transactions)
         ingest = IngestLocationBatch(devices, locations, sessions, config, sessionTracker, LocationValidator(clock), transactions, clock)
         purge = PurgeExpiredLocations(locations, config, clock)
         closeInactive = CloseInactiveSessions(sessions, sessionTracker, config, transactions, clock)
@@ -79,9 +93,33 @@ class RoomServerRepositoriesTest {
     private fun rowCount(table: String): Int =
         database.openHelper.readableDatabase.query("SELECT COUNT(*) FROM $table").use { it.moveToFirst(); it.getInt(0) }
 
+    private var nonces = 0
+
+    private suspend fun register(registration: DeviceRegistration, remoteAddress: String?) =
+        registerDevice(registration, aSignedRequest(registration.deviceId, registration.publicKey, clock.now(), "nonce-${++nonces}"), remoteAddress)
+
+    /** Registered and approved; registering again opens its session, as for a tracker already let in. */
+    private suspend fun enroll(registration: DeviceRegistration = aRegistration(), remoteAddress: String? = null) {
+        register(registration, remoteAddress).successValue()
+        setApproval(registration.deviceId, DeviceApproval.APPROVED).successValue()
+        register(registration, remoteAddress).successValue()
+    }
+
+    @Test
+    fun keyAndApprovalSurviveTheDatabase() = runTest {
+        register(aRegistration(), null).successValue()
+        assertEquals(DeviceApproval.PENDING, devices.get(DEVICE_A)?.approval)
+        assertEquals(fakePublicKey(DEVICE_A), devices.get(DEVICE_A)?.publicKey)
+
+        setApproval(DEVICE_A, DeviceApproval.APPROVED).successValue()
+
+        assertEquals(DeviceApproval.APPROVED, devices.get(DEVICE_A)?.approval)
+        assertEquals(DeviceApproval.APPROVED, devices.getAllWithLastLocation().single().device.approval)
+    }
+
     @Test
     fun ingestStoresEachLocationOnceAndTracksTheNewest() = runTest {
-        register(aRegistration(), "10.0.0.2").successValue()
+        enroll(aRegistration(), "10.0.0.2")
         clock.advanceBy(Duration.ofSeconds(30))
         val batch = listOf(aLocation(1, recordedAt = T0), aLocation(2, recordedAt = T0.plusSeconds(20)))
 
@@ -100,7 +138,7 @@ class RoomServerRepositoriesTest {
 
     @Test
     fun aLateBatchDoesNotMoveTheLastLocationBack() = runTest {
-        register(aRegistration(), null)
+        enroll()
         ingest(DEVICE_A, listOf(aLocation(2, recordedAt = T0.plusSeconds(60))), null).successValue()
 
         ingest(DEVICE_A, listOf(aLocation(1, recordedAt = T0)), null).successValue()
@@ -116,7 +154,7 @@ class RoomServerRepositoriesTest {
 
     @Test
     fun purgeKeepsEachDevicesLastLocation() = runTest {
-        register(aRegistration(), null)
+        enroll()
         ingest(DEVICE_A, listOf(aLocation(1), aLocation(2, recordedAt = T0.plusSeconds(1))), null).successValue()
         clock.advanceBy(Duration.ofDays(2))
 
@@ -128,7 +166,7 @@ class RoomServerRepositoriesTest {
 
     @Test
     fun removingADeviceCascadesToItsLocationsAndSessions() = runTest {
-        register(aRegistration(), null)
+        enroll()
         ingest(DEVICE_A, listOf(aLocation(1), aLocation(2)), null).successValue()
 
         remove(DEVICE_A).successValue()
@@ -140,7 +178,7 @@ class RoomServerRepositoriesTest {
 
     @Test
     fun silentSessionsAreClosedWhenTheirDeviceWentQuiet() = runTest {
-        register(aRegistration(), null)
+        enroll()
         clock.advanceBy(Duration.ofMinutes(6))
 
         assertEquals(1, closeInactive())
@@ -153,7 +191,7 @@ class RoomServerRepositoriesTest {
 
     @Test
     fun theDeviceListIsRefreshedWhenALocationArrives() = runTest {
-        register(aRegistration(), null)
+        enroll()
         val emissions = Channel<List<DeviceWithLastLocation>>(Channel.UNLIMITED)
         val collector = launch { devices.observeAllWithLastLocation().collect { emissions.send(it) } }
         assertNull(emissions.receive().single().lastLocation)
@@ -168,7 +206,7 @@ class RoomServerRepositoriesTest {
 
     @Test
     fun registeringAgainKeepsTheCreationDateAndTheSession() = runTest {
-        register(aRegistration(), null)
+        enroll()
         clock.advanceBy(Duration.ofMinutes(1))
 
         val again = register(aRegistration(name = "Ana"), null).successValue()

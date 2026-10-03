@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.asFailure
@@ -43,16 +44,9 @@ class ObserveDeviceOverviews(
     private val refreshPeriod: kotlin.time.Duration = 30.seconds,
 ) {
     operator fun invoke(): Flow<List<DeviceOverview>> =
-        combine(devices.observeAllWithLastLocation(), serverConfig.observe(), ticker()) { rows, config, _ ->
+        combine(devices.observeAllWithLastLocation(), serverConfig.observe(), ticker(refreshPeriod)) { rows, config, _ ->
             rows.toOverviews(clock.now(), config.onlineThreshold)
         }.distinctUntilChanged()
-
-    private fun ticker(): Flow<Unit> = flow {
-        while (true) {
-            emit(Unit)
-            delay(refreshPeriod)
-        }
-    }
 }
 
 class GetDeviceDetail(
@@ -68,6 +62,38 @@ class GetDeviceDetail(
         // An open session whose device went silent is closed lazily; do not present it as current.
         val current = sessions.findOpen(id)?.takeIf { Duration.between(it.lastActivityAt, now) <= threshold }
         return DeviceDetail(row.toOverview(now, threshold), current).asSuccess()
+    }
+}
+
+/** One device for the detail screen, with its recent sessions; null once the device is removed. */
+class ObserveDeviceDetail(
+    private val devices: DeviceRepository,
+    private val sessions: SessionRepository,
+    private val serverConfig: ServerConfigRepository,
+    private val clock: Clock,
+    private val refreshPeriod: kotlin.time.Duration = 30.seconds,
+) {
+    operator fun invoke(id: DeviceId): Flow<DeviceDetail?> =
+        combine(devices.observeAllWithLastLocation(), serverConfig.observe(), ticker(refreshPeriod)) { rows, config, _ ->
+            rows.firstOrNull { it.device.id == id } to config.onlineThreshold
+        }.map { (row, threshold) ->
+            row ?: return@map null
+            val now = clock.now()
+            val recent = sessions.findRecent(id, RECENT_SESSIONS)
+            val current = recent.firstOrNull { it.isOpen && Duration.between(it.lastActivityAt, now) <= threshold }
+            DeviceDetail(row.toOverview(now, threshold), current, recent)
+        }.distinctUntilChanged()
+
+    companion object {
+        const val RECENT_SESSIONS = 5
+    }
+}
+
+/** Emits at once and then every [period]: device status depends on the clock, not only on data. */
+private fun ticker(period: kotlin.time.Duration): Flow<Unit> = flow {
+    while (true) {
+        emit(Unit)
+        delay(period)
     }
 }
 

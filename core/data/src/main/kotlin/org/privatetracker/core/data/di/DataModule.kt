@@ -9,6 +9,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import org.privatetracker.core.data.repository.DataStoreAppModeRepository
 import org.privatetracker.core.data.repository.DataStoreIdentityRepository
 import org.privatetracker.core.data.repository.DataStoreServerConfigRepository
 import org.privatetracker.core.data.repository.DataStoreTrackerConfigRepository
@@ -24,12 +25,14 @@ import org.privatetracker.core.database.server.DeviceDao
 import org.privatetracker.core.database.server.LocationDao
 import org.privatetracker.core.database.server.SessionDao
 import org.privatetracker.core.database.tracker.OutboxDao
+import org.privatetracker.core.datastore.AppModeData
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.ServerConfigData
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
 import org.privatetracker.core.datastore.createJsonDataStore
 import org.privatetracker.core.domain.port.TransactionRunner
+import org.privatetracker.core.domain.repository.AppModeRepository
 import org.privatetracker.core.domain.repository.DeviceRepository
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.LocationRepository
@@ -68,6 +71,10 @@ object StorageModule {
         createJsonDataStore(context, "identity", IdentityData.serializer(), IdentityData())
 
     @Provides @Singleton
+    fun appModeStore(@ApplicationContext context: Context): DataStore<AppModeData> =
+        createJsonDataStore(context, "app_mode", AppModeData.serializer(), AppModeData())
+
+    @Provides @Singleton
     fun trackerStateStore(@ApplicationContext context: Context): DataStore<TrackerStateData> =
         createJsonDataStore(context, "tracker_state", TrackerStateData.serializer(), TrackerStateData())
 }
@@ -84,4 +91,5 @@ abstract class RepositoryModule {
     @Binds abstract fun serverConfig(repository: DataStoreServerConfigRepository): ServerConfigRepository
     @Binds abstract fun identity(repository: DataStoreIdentityRepository): IdentityRepository
     @Binds abstract fun trackerState(repository: DataStoreTrackerStateRepository): TrackerStateRepository
+    @Binds abstract fun appMode(repository: DataStoreAppModeRepository): AppModeRepository
 }

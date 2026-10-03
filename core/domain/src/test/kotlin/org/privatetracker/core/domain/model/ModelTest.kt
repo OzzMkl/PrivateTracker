@@ -2,9 +2,11 @@ package org.privatetracker.core.domain.model
 
 import org.privatetracker.core.domain.geo.distanceMeters
 import org.privatetracker.core.domain.testing.T0
+import org.privatetracker.core.domain.testing.aDevice
 import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -58,5 +60,14 @@ class DistanceTest {
     @Test
     fun `distance to the same point is zero`() {
         assertEquals(0.0, distanceMeters(19.4326, -99.1332, 19.4326, -99.1332))
+    }
+}
+
+class DeviceApprovalTest {
+    @Test
+    fun `only a device with a key awaits approval`() {
+        assertTrue(aDevice(approval = DeviceApproval.PENDING).awaitsApproval)
+        assertFalse(aDevice(approval = DeviceApproval.PENDING).copy(publicKey = null).awaitsApproval)
+        assertFalse(aDevice(approval = DeviceApproval.APPROVED).awaitsApproval)
     }
 }

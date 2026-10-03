@@ -1,10 +1,12 @@
 package org.privatetracker.core.protocol.mapper
 
+import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.common.result.asSuccess
+import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceDetail
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceOverview
@@ -13,17 +15,21 @@ import org.privatetracker.core.domain.model.DeviceSession
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationId
+import org.privatetracker.core.domain.model.PairingClaim
 import org.privatetracker.core.domain.model.Platform
 import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
+import org.privatetracker.core.domain.model.ServerIdentity
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.protocol.v1.ErrorCode
 import org.privatetracker.core.protocol.v1.dto.DeviceDetailDto
 import org.privatetracker.core.protocol.v1.dto.DeviceSummaryDto
 import org.privatetracker.core.protocol.v1.dto.HealthResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchResponse
 import org.privatetracker.core.protocol.v1.dto.LocationDto
+import org.privatetracker.core.protocol.v1.dto.PairingClaimDto
 import org.privatetracker.core.protocol.v1.dto.ProblemDetails
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceRequest
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceResponse
@@ -109,30 +115,36 @@ fun DeviceRegistration.toDto(): RegisterDeviceRequest = RegisterDeviceRequest(
     platform = platform.name,
     appVersion = appVersion,
     protocolVersion = protocolVersion,
+    publicKey = publicKey,
+    pairing = pairing?.let { PairingClaimDto(it.ticketId, it.proof) },
 )
 
 fun RegisterDeviceRequest.toDomain(): Outcome<DeviceRegistration> {
     val id = DeviceId.parse(deviceId) ?: return invalid("device_id")
-    return DeviceRegistration(id, name, Platform.parse(platform), appVersion, protocolVersion).asSuccess()
+    val key = publicKey ?: return DomainError.Validation("public_key", FieldViolation.REQUIRED).asFailure()
+    val claim = pairing?.let { PairingClaim(it.ticket, it.proof) }
+    return DeviceRegistration(id, name, Platform.parse(platform), appVersion, protocolVersion, key, claim).asSuccess()
 }
 
 fun RegistrationResult.toDto(): RegisterDeviceResponse =
-    RegisterDeviceResponse(deviceId.value, created, maxBatchSize, WireTime.format(serverTime))
+    RegisterDeviceResponse(deviceId.value, created, maxBatchSize, WireTime.format(serverTime), approval.name)
 
 fun RegisterDeviceResponse.toDomain(): Outcome<RegistrationResult> {
     val id = DeviceId.parse(deviceId) ?: return invalid("device_id")
     val time = WireTime.parse(serverTime) ?: return invalid("server_time")
-    return RegistrationResult(id, created, maxBatchSize, time).asSuccess()
+    val state = DeviceApproval.entries.firstOrNull { it.name == approval } ?: return invalid("approval")
+    return RegistrationResult(id, created, maxBatchSize, time, state).asSuccess()
 }
 
 // Health
 
 fun ServerInfo.toDto(): HealthResponse =
-    HealthResponse("ok", name, version, protocolVersion, WireTime.format(serverTime))
+    HealthResponse("ok", name, version, protocolVersion, WireTime.format(serverTime), identity?.publicKey, identity?.signature)
 
 fun HealthResponse.toDomain(): Outcome<ServerInfo> {
     val time = WireTime.parse(serverTime) ?: return invalid("server_time")
-    return ServerInfo(serverName, serverVersion, protocolVersion, time).asSuccess()
+    val identity = if (serverKey != null && signature != null) ServerIdentity(serverKey, signature) else null
+    return ServerInfo(serverName, serverVersion, protocolVersion, time, identity).asSuccess()
 }
 
 // Read API
@@ -141,6 +153,7 @@ fun DeviceOverview.toSummaryDto(): DeviceSummaryDto = DeviceSummaryDto(
     deviceId = device.id.value,
     name = device.name,
     status = status.name,
+    approval = device.approval.name,
     lastSeenAt = device.lastSeenAt?.let(WireTime::format),
     lastLocation = lastLocation?.toDto(),
 )
@@ -150,6 +163,8 @@ fun DeviceDetail.toDto(): DeviceDetailDto = DeviceDetailDto(
     name = overview.device.name,
     platform = overview.device.platform.name,
     status = overview.status.name,
+    approval = overview.device.approval.name,
+    keyFingerprint = overview.device.publicKey?.let(::keyFingerprint),
     createdAt = WireTime.format(overview.device.createdAt),
     appVersion = overview.device.appVersion,
     lastSeenAt = overview.device.lastSeenAt?.let(WireTime::format),
@@ -169,5 +184,9 @@ fun ProblemDetails?.toDomainError(httpStatus: Int, retryAfterSeconds: Long?): Do
         ErrorCode.DEVICE_NOT_FOUND -> DomainError.DeviceNotFound
         ErrorCode.NEW_DEVICES_DISABLED -> DomainError.NewDevicesDisabled
         ErrorCode.BATCH_TOO_LARGE -> DomainError.BatchTooLarge(this?.maxBatchSize ?: 1)
-        else -> DomainError.Http(httpStatus, this?.code, retryAfterSeconds)
+        ErrorCode.DEVICE_PENDING_APPROVAL -> DomainError.DevicePendingApproval
+        ErrorCode.DEVICE_REJECTED -> DomainError.DeviceRejected
+        ErrorCode.PAIRING_INVALID -> DomainError.PairingInvalid
+        else -> AuthFailure.entries.firstOrNull { it.code == this?.code }?.let(DomainError::AuthenticationFailed)
+            ?: DomainError.Http(httpStatus, this?.code, retryAfterSeconds)
     }

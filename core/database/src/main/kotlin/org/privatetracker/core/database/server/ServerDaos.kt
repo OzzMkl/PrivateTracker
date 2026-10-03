@@ -44,12 +44,12 @@ interface DeviceDao {
     @Insert
     suspend fun insert(device: DeviceEntity): Long
 
-    /** Updates what a device reports about itself; never touches created_at or last_location_id. */
+    /** Updates what a device reports about itself and its approval; never touches created_at or last_location_id. */
     @Query(
         """
         UPDATE devices
         SET name = :name, platform = :platform, app_version = :appVersion, protocol_version = :protocolVersion,
-            public_key = :publicKey, last_seen_at = :lastSeenAt
+            public_key = :publicKey, last_seen_at = :lastSeenAt, approval = :approval
         WHERE device_uid = :uid
         """,
     )
@@ -61,6 +61,7 @@ interface DeviceDao {
         protocolVersion: Int,
         publicKey: String?,
         lastSeenAt: Long?,
+        approval: String,
     ): Int
 
     @Query(

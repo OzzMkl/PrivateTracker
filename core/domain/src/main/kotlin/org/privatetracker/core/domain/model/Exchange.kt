@@ -11,6 +11,10 @@ data class DeviceRegistration(
     val platform: Platform,
     val appVersion: String?,
     val protocolVersion: Int,
+    /** The key every later request is signed with; see [Device.publicKey]. */
+    val publicKey: String,
+    /** Present when the tracker registers from a QR invite; a valid one approves it at once. */
+    val pairing: PairingClaim? = null,
 )
 
 data class RegistrationResult(
@@ -18,6 +22,19 @@ data class RegistrationResult(
     val created: Boolean,
     val maxBatchSize: Int,
     val serverTime: Instant,
+    val approval: DeviceApproval,
+)
+
+/**
+ * A request as the server checks it: who claims to send it, when and with which one-time [nonce],
+ * and the signature over [signingInput]. The wire format lives in core:protocol.
+ */
+class SignedRequest(
+    val deviceId: DeviceId,
+    val signedAt: Instant,
+    val nonce: String,
+    val signingInput: ByteArray,
+    val signature: ByteArray,
 )
 
 /** What the tracker remembers about its registration with a server. */
@@ -27,12 +44,13 @@ data class TrackerRegistration(
     val registeredAt: Instant,
 )
 
-/** Answer of the server health endpoint. */
+/** Answer of the server health endpoint. [identity] answers the challenge, when the tracker sent one. */
 data class ServerInfo(
     val name: String,
     val version: String,
     val protocolVersion: Int,
     val serverTime: Instant,
+    val identity: ServerIdentity? = null,
 )
 
 data class ConnectionCheck(

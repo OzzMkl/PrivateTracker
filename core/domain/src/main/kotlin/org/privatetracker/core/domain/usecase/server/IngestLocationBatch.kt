@@ -5,6 +5,7 @@ import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.common.result.asSuccess
 import org.privatetracker.core.common.time.Clock
+import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
@@ -55,6 +56,12 @@ class IngestLocationBatch(
         return transaction.run<Outcome<LocationBatchResult>> {
             val current = devices.getWithLastLocation(deviceId)
                 ?: return@run DomainError.DeviceNotRegistered.asFailure()
+            // The API authenticates first; this keeps any other caller from storing for an unapproved device.
+            when (current.device.approval) {
+                DeviceApproval.PENDING -> return@run DomainError.DevicePendingApproval.asFailure()
+                DeviceApproval.REJECTED -> return@run DomainError.DeviceRejected.asFailure()
+                DeviceApproval.APPROVED -> Unit
+            }
             val session = sessionTracker.recordActivity(
                 deviceId = deviceId,
                 now = now,

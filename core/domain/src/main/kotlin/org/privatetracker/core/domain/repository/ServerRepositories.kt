@@ -7,6 +7,7 @@ import org.privatetracker.core.domain.model.DeviceSession
 import org.privatetracker.core.domain.model.DeviceWithLastLocation
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationId
+import org.privatetracker.core.domain.model.PairingTicket
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.SessionId
 import java.time.Instant
@@ -49,4 +50,23 @@ interface ServerConfigRepository {
     fun observe(): Flow<ServerConfig>
     suspend fun get(): ServerConfig
     suspend fun update(transform: (ServerConfig) -> ServerConfig): ServerConfig
+}
+
+/**
+ * Tickets of QR invites. They live in memory: a restart of the server only means showing a new QR.
+ * One ticket is open at a time; issuing a new one withdraws any ticket not yet used.
+ */
+interface PairingTicketStore {
+    fun issue(ticket: PairingTicket)
+    fun get(id: String): PairingTicket?
+
+    /**
+     * Marks [id] as used by [deviceId], atomically. True also when [deviceId] already used it, so a
+     * tracker that lost the answer can register again; false when another device took it first.
+     */
+    fun consume(id: String, deviceId: DeviceId): Boolean
+
+    /** Ends [id] if it is still the open ticket, as when its QR leaves the screen. */
+    fun withdraw(id: String)
+    fun observe(id: String): Flow<PairingTicket?>
 }

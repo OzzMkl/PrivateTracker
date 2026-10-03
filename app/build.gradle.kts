@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // Navigation keys are @Serializable so the back stack survives process death.
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
@@ -17,7 +19,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "0.1.0-spike"
+        versionName = "0.1.0-alpha"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -61,13 +63,21 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":core:network"))
-    implementation(project(":server:api"))
+    implementation(project(":core:protocol"))
+    implementation(project(":core:location"))
+    implementation(project(":core:security"))
+    implementation(project(":core:designsystem"))
+    implementation(project(":feature:onboarding"))
+    implementation(project(":feature:tracker"))
+    implementation(project(":feature:server"))
+    implementation(project(":feature:devices"))
+    implementation(project(":feature:settings"))
 
-    implementation(libs.ktor.server.netty) {
-        // Only desktop binaries for HTTP/3; the QUIC classes stay in netty-codec-classes-quic.
-        exclude(group = "io.netty", module = "netty-codec-native-quic")
-    }
     implementation(libs.ktor.client.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
+    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
