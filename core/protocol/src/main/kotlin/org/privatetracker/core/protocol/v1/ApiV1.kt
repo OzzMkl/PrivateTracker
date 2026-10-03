@@ -25,6 +25,17 @@ object ApiV1 {
     fun locationsPath(deviceId: String): String = "$DEVICES/$deviceId/locations"
 }
 
+/**
+ * How a server announces itself on the local network (DNS-SD over mDNS), from 0.3 on. The TXT record
+ * carries the protocol version and a hint of the server's key, so a tracker skips servers that are
+ * clearly not its own; only the signed health challenge proves which server it is.
+ */
+object LanAnnouncement {
+    const val SERVICE_TYPE = "_privatetracker._tcp"
+    const val PROTOCOL_ATTRIBUTE = "v"
+    const val KEY_HINT_ATTRIBUTE = "k"
+}
+
 /** Wire JSON: unknown fields are ignored and nulls omitted, so either side can add optional fields. */
 val ProtocolJson: Json = Json {
     ignoreUnknownKeys = true

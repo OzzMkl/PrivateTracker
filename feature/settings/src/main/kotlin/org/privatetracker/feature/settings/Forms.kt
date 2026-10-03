@@ -62,6 +62,7 @@ data class ServerForm(
     val retentionDays: String,
     val maxBatchSize: String,
     val exposeReadApi: Boolean,
+    val advertiseOnLan: Boolean,
     val errors: Map<String, FieldViolation> = emptyMap(),
     val dirty: Boolean = false,
 ) {
@@ -77,6 +78,7 @@ data class ServerForm(
             retentionDays = numbers.int("retentionDays", retentionDays),
             maxBatchSize = numbers.int("maxBatchSize", maxBatchSize),
             exposeReadApi = exposeReadApi,
+            advertiseOnLan = advertiseOnLan,
         )
         return config to numbers.violations
     }
@@ -92,6 +94,7 @@ data class ServerForm(
             retentionDays = config.retentionDays.toString(),
             maxBatchSize = config.maxBatchSize.toString(),
             exposeReadApi = config.exposeReadApi,
+            advertiseOnLan = config.advertiseOnLan,
         )
     }
 }

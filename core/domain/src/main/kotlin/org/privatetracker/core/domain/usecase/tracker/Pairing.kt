@@ -11,11 +11,14 @@ import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.ServerInfo
 import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.model.serverIdentityInput
+import org.privatetracker.core.domain.model.serverKeyHint
+import org.privatetracker.core.domain.port.ServerDiscovery
 import org.privatetracker.core.domain.port.ServerGateway
 import org.privatetracker.core.domain.port.SignatureVerifier
 import org.privatetracker.core.domain.repository.TrackerConfigRepository
 import java.security.SecureRandom
 import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 
 /**
@@ -97,21 +100,48 @@ class GetCurrentServer(private val trackerConfig: TrackerConfigRepository) {
 }
 
 /**
- * After the server stopped answering at its address, looks for it at the other addresses its QR
- * code listed and switches to the first one where it proves its key. True when it switched.
+ * After the server stopped answering at its address, looks for it at the other addresses its QR code
+ * listed and then on the local network, and switches to the first place where it proves its key. A
+ * server found by discovery joins the known addresses. True when it switched.
+ *
+ * Discovery listens on the network for seconds, so it runs at most once per [discoveryInterval]: a
+ * server that is simply off must not cost a scan at every upload. Keep one instance per process.
  */
 class FailOverServerAddress(
     private val trackerConfig: TrackerConfigRepository,
     private val verifyServer: VerifyServerIdentity,
+    private val discovery: ServerDiscovery,
+    private val clock: Clock,
+    private val discoveryInterval: Duration = DISCOVERY_INTERVAL,
 ) {
+    private var lastDiscovery: Instant? = null
+
     suspend operator fun invoke(): Boolean {
         val config = trackerConfig.get()
         if (config.serverKey.isBlank()) return false
-        val found = config.serverAddresses
-            .filter { it != config.serverUrl }
+        val known = config.serverAddresses.filter { it != config.serverUrl }
+        known.firstOrNull { verifyServer(it, config.serverKey) is Outcome.Success }?.let { found ->
+            trackerConfig.update { it.copy(serverUrl = found) }
+            return true
+        }
+
+        val now = clock.now()
+        if (lastDiscovery?.let { Duration.between(it, now) < discoveryInterval } == true) return false
+        lastDiscovery = now
+        val hint = serverKeyHint(config.serverKey)
+        val found = discovery.discover(DISCOVERY_TIMEOUT)
+            .filter { (it.keyHint == null || it.keyHint == hint) && it.url != config.serverUrl && it.url !in known }
+            .map { it.url }
+            .distinct()
             .firstOrNull { verifyServer(it, config.serverKey) is Outcome.Success }
             ?: return false
-        trackerConfig.update { it.copy(serverUrl = found) }
+        trackerConfig.update { it.copy(serverUrl = found, serverAddresses = (listOf(found) + it.serverAddresses).distinct().take(MAX_ADDRESSES)) }
         return true
+    }
+
+    companion object {
+        val DISCOVERY_INTERVAL: Duration = Duration.ofMinutes(5)
+        val DISCOVERY_TIMEOUT: Duration = Duration.ofSeconds(8)
+        private const val MAX_ADDRESSES = 8
     }
 }

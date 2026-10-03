@@ -36,6 +36,8 @@ data class ServerConfig(
     val maxBatchSize: Int = 100,
     /** When false, read endpoints only answer requests from the phone itself. */
     val exposeReadApi: Boolean = false,
+    /** Announces the server on the local network (mDNS), so paired trackers find it after its address changes. */
+    val advertiseOnLan: Boolean = true,
 ) {
     val onlineThreshold: Duration get() = Duration.ofSeconds(onlineThresholdSeconds.toLong())
     val retention: Duration get() = Duration.ofDays(retentionDays.toLong())

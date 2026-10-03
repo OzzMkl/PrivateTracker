@@ -186,6 +186,7 @@ internal fun ServerConfigData.toDomain() = ServerConfig(
     retentionDays = retentionDays,
     maxBatchSize = maxBatchSize,
     exposeReadApi = exposeReadApi,
+    advertiseOnLan = advertiseOnLan,
 )
 
 internal fun ServerConfig.toData() = ServerConfigData(
@@ -198,6 +199,7 @@ internal fun ServerConfig.toData() = ServerConfigData(
     retentionDays = retentionDays,
     maxBatchSize = maxBatchSize,
     exposeReadApi = exposeReadApi,
+    advertiseOnLan = advertiseOnLan,
 )
 
 internal fun RegistrationData.toDomain() = TrackerRegistration(serverUrl, maxBatchSize, registeredAtMillis.toInstant())

@@ -18,6 +18,7 @@ import org.privatetracker.core.domain.port.NetworkInfoProvider
 import org.privatetracker.core.domain.port.NonceRegistry
 import org.privatetracker.core.domain.port.PermissionChecker
 import org.privatetracker.core.domain.port.ServerController
+import org.privatetracker.core.domain.port.ServerDiscovery
 import org.privatetracker.core.domain.port.ServerGateway
 import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.port.SignatureVerifier
@@ -267,8 +268,10 @@ object DomainModule {
 
     @Provides fun getCurrentServer(config: TrackerConfigRepository) = GetCurrentServer(config)
 
-    @Provides
-    fun failOverServerAddress(config: TrackerConfigRepository, verifyServer: VerifyServerIdentity) = FailOverServerAddress(config, verifyServer)
+    /** Singleton: it remembers when it last scanned the network, so a server that is off is not scanned for at every upload. */
+    @Provides @Singleton
+    fun failOverServerAddress(config: TrackerConfigRepository, verifyServer: VerifyServerIdentity, discovery: ServerDiscovery, clock: Clock) =
+        FailOverServerAddress(config, verifyServer, discovery, clock)
 
     @Provides
     fun getDeviceKeyFingerprint(identity: GetOrCreateDeviceIdentity, keys: DeviceKeys) = GetDeviceKeyFingerprint(identity, keys)

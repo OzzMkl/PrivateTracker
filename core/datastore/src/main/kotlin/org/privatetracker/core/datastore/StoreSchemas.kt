@@ -32,6 +32,7 @@ data class ServerConfigData(
     val retentionDays: Int = 30,
     val maxBatchSize: Int = 100,
     val exposeReadApi: Boolean = false,
+    val advertiseOnLan: Boolean = true,
 )
 
 @Serializable

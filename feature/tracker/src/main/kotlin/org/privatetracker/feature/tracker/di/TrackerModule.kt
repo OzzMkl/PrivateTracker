@@ -8,8 +8,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import org.privatetracker.core.domain.port.BatteryLevelProvider
+import org.privatetracker.core.domain.port.ServerDiscovery
 import org.privatetracker.core.domain.port.TrackingController
 import org.privatetracker.core.domain.port.UploadScheduler
+import org.privatetracker.feature.tracker.discovery.NsdServerDiscovery
 import org.privatetracker.feature.tracker.service.ServiceTrackingController
 import org.privatetracker.feature.tracker.worker.WorkManagerUploadScheduler
 import javax.inject.Inject
@@ -22,6 +24,8 @@ abstract class TrackerModule {
     @Binds abstract fun uploadScheduler(scheduler: WorkManagerUploadScheduler): UploadScheduler
 
     @Binds abstract fun battery(provider: AndroidBatteryLevelProvider): BatteryLevelProvider
+
+    @Binds abstract fun serverDiscovery(discovery: NsdServerDiscovery): ServerDiscovery
 }
 
 class AndroidBatteryLevelProvider @Inject constructor(

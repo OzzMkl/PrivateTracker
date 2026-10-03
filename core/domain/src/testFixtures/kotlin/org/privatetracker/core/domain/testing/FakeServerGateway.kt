@@ -36,6 +36,9 @@ class FakeServerGateway(private val clock: Clock = FakeClock()) : ServerGateway 
     /** When set, health answers a challenge with this key, signed as [FakeSignatureVerifier] expects. */
     var serverKey: String? = null
 
+    /** Another server at some addresses, with its own key. */
+    val keysByUrl = mutableMapOf<String, String>()
+
     /** Addresses where nothing answers. */
     val unreachable = mutableSetOf<String>()
 
@@ -44,7 +47,7 @@ class FakeServerGateway(private val clock: Clock = FakeClock()) : ServerGateway 
         if (serverUrl in unreachable) return Outcome.Failure(DomainError.Network.Unreachable)
         healthResponses.removeFirstOrNull()?.let { return it }
         val now = clock.now()
-        val identity = serverKey?.takeIf { challenge != null }?.let { key ->
+        val identity = (keysByUrl[serverUrl] ?: serverKey)?.takeIf { challenge != null }?.let { key ->
             ServerIdentity(key, Base64.getEncoder().encodeToString(fakeSignature(key, serverIdentityInput(challenge!!, now))))
         }
         return Outcome.Success(ServerInfo("Fake", "0.1.0", ProtocolVersion.CURRENT, now, identity))

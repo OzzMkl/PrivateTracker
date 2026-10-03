@@ -53,6 +53,8 @@
     <string name="server_online_threshold">Inactivo tras (segundos)</string>
     <string name="server_retention">Conservar posiciones (días)</string>
     <string name="server_max_batch">Máximo por envío</string>
+    <string name="server_advertise">Anunciar en la red local</string>
+    <string name="server_advertise_body">Los teléfonos emparejados encuentran el servidor aunque cambie su IP. Apágalo si prefieres que otros en tu Wi-Fi no vean que hay un servidor PrivateTracker.</string>
     <string name="server_expose_read">Permitir consultas desde la red</string>
     <string name="server_expose_read_body">Cualquiera en tu red podría ver las ubicaciones. Déjalo apagado salvo que lo necesites.</string>
     <string name="server_restart_needed">El cambio de puerto o interfaz se aplica al reiniciar el servidor.</string>

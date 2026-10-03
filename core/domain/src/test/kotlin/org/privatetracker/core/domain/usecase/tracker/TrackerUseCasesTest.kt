@@ -6,6 +6,7 @@ import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.domain.model.AppInfo
 import org.privatetracker.core.domain.model.DeviceApproval
+import org.privatetracker.core.domain.model.DiscoveredServer
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.Platform
@@ -19,10 +20,12 @@ import org.privatetracker.core.domain.model.TrackerRegistration
 import org.privatetracker.core.domain.model.UploadResult
 import org.privatetracker.core.domain.model.isValidPairingProof
 import org.privatetracker.core.domain.model.keyFingerprint
+import org.privatetracker.core.domain.model.serverKeyHint
 import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.DEVICE_B
 import org.privatetracker.core.domain.testing.FakeClock
 import org.privatetracker.core.domain.testing.FakeDeviceKeys
+import org.privatetracker.core.domain.testing.FakeServerDiscovery
 import org.privatetracker.core.domain.testing.FakeServerGateway
 import org.privatetracker.core.domain.testing.FakeServerKeys
 import org.privatetracker.core.domain.testing.FakeSignatureVerifier
@@ -69,7 +72,8 @@ private class TrackerFixture(
     val register = RegisterDevice(gateway, this.config, state, identity, keys, verifyServer, AppInfo(Platform.ANDROID, "0.1.0"), clock)
     val upload = UploadPendingLocations(outbox, gateway, this.config, state, register, identity, clock)
     val pair = PairWithServer(verifyServer, this.config, register, clock)
-    val failOver = FailOverServerAddress(this.config, verifyServer)
+    val discovery = FakeServerDiscovery()
+    val failOver = FailOverServerAddress(this.config, verifyServer, discovery, clock)
 
     suspend fun enqueue(count: Int) = repeat(count) { outbox.enqueue(aLocation(it + 1), maxSize = 10_000) }
 }
@@ -388,6 +392,41 @@ class PairingTest {
         fixture.gateway.unreachable += vpn
         assertFalse(fixture.failOver())
         assertFalse(TrackerFixture().failOver(), "a server typed by hand has no other addresses")
+    }
+
+    @Test
+    fun `when no listed address answers, the tracker finds its server on the local network and remembers it`() = runTest {
+        val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverKey = serverKey, serverAddresses = listOf(lan, vpn)))
+        fixture.gateway.serverKey = serverKey
+        fixture.gateway.unreachable += listOf(lan, vpn)
+        val other = "http://192.168.1.99:8787"
+        val impostor = "http://192.168.1.66:8787"
+        val moved = "http://192.168.1.77:8787"
+        // Another household's server announces another key: not even asked.
+        fixture.discovery.found += DiscoveredServer(other, keyHint = "0000000000000000")
+        // Announces our key's hint but cannot prove the key.
+        fixture.discovery.found += DiscoveredServer(impostor, serverKeyHint(serverKey))
+        fixture.gateway.keysByUrl[impostor] = fakePublicKey(DEVICE_B)
+        fixture.discovery.found += DiscoveredServer(moved, serverKeyHint(serverKey))
+
+        assertTrue(fixture.failOver())
+
+        assertEquals(moved, fixture.config.get().serverUrl)
+        assertEquals(listOf(moved, lan, vpn), fixture.config.get().serverAddresses)
+        assertTrue(fixture.gateway.healthCalls.none { it.first == other })
+    }
+
+    @Test
+    fun `a server that is simply off costs one network scan every five minutes, not one per upload`() = runTest {
+        val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverKey = serverKey, serverAddresses = listOf(lan)))
+        fixture.gateway.unreachable += lan
+
+        repeat(3) { assertFalse(fixture.failOver()) }
+        assertEquals(1, fixture.discovery.calls)
+
+        fixture.clock.advanceBy(FailOverServerAddress.DISCOVERY_INTERVAL)
+        assertFalse(fixture.failOver())
+        assertEquals(2, fixture.discovery.calls)
     }
 
     @Test

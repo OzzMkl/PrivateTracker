@@ -58,3 +58,12 @@ fun isValidPairingProof(secret: String, deviceId: DeviceId, publicKey: String, p
 /** What the server signs to answer a tracker's [challenge]: the challenge and its own time. */
 fun serverIdentityInput(challenge: String, serverTime: Instant): ByteArray =
     "PrivateTracker-server-v1\n$challenge\n${serverTime.toEpochMilli()}".encodeToByteArray()
+
+/** A server announcing itself on the local network, as a tracker found it. */
+data class DiscoveredServer(val url: String, val keyHint: String?)
+
+/**
+ * What a server announces about its key on the network: its fingerprint without dashes. It only spares
+ * a tracker from asking every server it finds; the signed health challenge is what proves identity.
+ */
+fun serverKeyHint(publicKey: String): String? = keyFingerprint(publicKey)?.replace("-", "")

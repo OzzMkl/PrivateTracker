@@ -5,12 +5,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import org.privatetracker.core.domain.model.AppMode
 import org.privatetracker.core.domain.model.AppPermission
+import org.privatetracker.core.domain.model.DiscoveredServer
 import org.privatetracker.core.domain.model.NetworkAddress
 import org.privatetracker.core.domain.model.ServerActivity
 import org.privatetracker.core.domain.model.ServerRunState
 import org.privatetracker.core.domain.model.TrackerActivity
 import org.privatetracker.core.domain.port.NetworkInfoProvider
 import org.privatetracker.core.domain.port.PermissionChecker
+import org.privatetracker.core.domain.port.ServerDiscovery
 import org.privatetracker.core.domain.port.ServerController
 import org.privatetracker.core.domain.port.TrackingController
 import org.privatetracker.core.domain.port.UploadScheduler
@@ -80,5 +82,16 @@ class InMemoryAppModeRepository(initial: AppMode? = null) : AppModeRepository {
     override suspend fun get(): AppMode? = state.value
     override suspend fun set(mode: AppMode) {
         state.value = mode
+    }
+}
+
+/** Servers announced on a pretend local network; [calls] counts the scans. */
+class FakeServerDiscovery : ServerDiscovery {
+    val found = mutableListOf<DiscoveredServer>()
+    var calls = 0
+
+    override suspend fun discover(timeout: Duration): List<DiscoveredServer> {
+        calls++
+        return found.toList()
     }
 }

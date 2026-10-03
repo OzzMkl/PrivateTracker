@@ -6,6 +6,7 @@ import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.domain.model.AppPermission
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
+import org.privatetracker.core.domain.model.DiscoveredServer
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationFix
@@ -80,6 +81,12 @@ interface SignatureVerifier {
 fun interface NonceRegistry {
     /** Remembers [nonce] of [deviceId] until [expiresAt]. False when it was already seen: a replay. */
     fun register(deviceId: DeviceId, nonce: String, expiresAt: Instant): Boolean
+}
+
+/** Finds PrivateTracker servers announcing themselves on the local network. */
+fun interface ServerDiscovery {
+    /** Listens for up to [timeout] and returns what answered; empty when discovery is unavailable. */
+    suspend fun discover(timeout: Duration): List<DiscoveredServer>
 }
 
 data class LocationRequestSpec(

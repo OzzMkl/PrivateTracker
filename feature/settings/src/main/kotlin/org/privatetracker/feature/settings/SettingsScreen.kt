@@ -351,6 +351,12 @@ private fun ServerSection(form: ServerForm, restartNeeded: Boolean, restarting: 
             keyboardType = KeyboardType.Number,
         )
         SwitchRow(
+            title = stringResource(R.string.server_advertise),
+            body = stringResource(R.string.server_advertise_body),
+            checked = form.advertiseOnLan,
+            onCheckedChange = { value -> change { it.copy(advertiseOnLan = value) } },
+        )
+        SwitchRow(
             title = stringResource(R.string.server_expose_read),
             body = stringResource(R.string.server_expose_read_body),
             checked = form.exposeReadApi,
