@@ -1,0 +1,4 @@
+<resources>
+    <!-- Window theme only; the UI is themed by Compose Material 3. -->
+    <style name="Theme.PrivateTracker" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older: same rule as data_extraction_rules.xml, no location data in backups. -->
+<full-backup-content>
+    <exclude domain="database" path="." />
+    <exclude domain="file" path="datastore/" />
+</full-backup-content>

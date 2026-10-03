@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Location history must never reach a third-party cloud: databases and DataStore files are
+    excluded from cloud backup. Direct device-to-device transfer keeps them.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="." />
+        <exclude domain="file" path="datastore/" />
+    </cloud-backup>
+</data-extraction-rules>

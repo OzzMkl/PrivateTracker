@@ -1,0 +1,24 @@
+package org.privatetracker.core.domain.usecase.server
+
+import org.privatetracker.core.common.result.DomainError
+import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.common.result.asFailure
+import org.privatetracker.core.common.result.asSuccess
+import org.privatetracker.core.domain.model.ServerConfig
+import org.privatetracker.core.domain.repository.ServerConfigRepository
+import org.privatetracker.core.domain.validation.ServerConfigValidator
+
+data class ServerConfigUpdate(val config: ServerConfig, val restartRequired: Boolean)
+
+class UpdateServerConfig(private val repository: ServerConfigRepository) {
+    suspend operator fun invoke(config: ServerConfig): Outcome<ServerConfigUpdate> {
+        val normalized = config.copy(serverName = config.serverName.trim(), bindAddress = config.bindAddress.trim())
+        val violations = ServerConfigValidator.validate(normalized)
+        if (violations.isNotEmpty()) return DomainError.Validation(violations).asFailure()
+
+        val previous = repository.get()
+        repository.update { normalized }
+        val restartRequired = previous.port != normalized.port || previous.bindAddress != normalized.bindAddress
+        return ServerConfigUpdate(normalized, restartRequired).asSuccess()
+    }
+}

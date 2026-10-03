@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Protocol v1 runs over plain HTTP on a LAN or VPN, and servers have arbitrary IP addresses,
+    which domain-config cannot express. Cleartext is therefore allowed for every host until
+    HTTPS arrives in 0.4, when this base-config goes back to the platform default.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
