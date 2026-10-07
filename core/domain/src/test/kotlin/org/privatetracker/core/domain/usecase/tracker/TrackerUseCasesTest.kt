@@ -16,9 +16,11 @@ import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
 import org.privatetracker.core.domain.model.ServerInfo
 import org.privatetracker.core.domain.model.ServerPin
+import org.privatetracker.core.domain.model.SignedEncryptionKey
 import org.privatetracker.core.domain.model.SkipReason
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
+import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import org.privatetracker.core.domain.model.UploadResult
 import org.privatetracker.core.domain.model.isValidPairingProof
 import org.privatetracker.core.domain.model.keyFingerprint
@@ -40,6 +42,7 @@ import org.privatetracker.core.domain.testing.SequentialIdGenerator
 import org.privatetracker.core.domain.testing.T0
 import org.privatetracker.core.domain.testing.aFix
 import org.privatetracker.core.domain.testing.aLocation
+import org.privatetracker.core.domain.testing.anEncryptionKey
 import org.privatetracker.core.domain.testing.failureError
 import org.privatetracker.core.domain.testing.fakePublicKey
 import org.privatetracker.core.domain.testing.successValue
@@ -72,8 +75,9 @@ private class TrackerFixture(
     val record = RecordLocation(outbox, state, this.config, identity, FixedBattery(55), LocationValidator(clock), ids)
     val keys = FakeDeviceKeys()
     val verifyServer = VerifyServerIdentity(gateway, FakeSignatureVerifier)
-    val register = RegisterDevice(gateway, this.config, state, identity, keys, verifyServer, AppInfo(Platform.ANDROID, "0.1.0"), clock)
-    val upload = UploadPendingLocations(outbox, gateway, this.config, state, register, identity, clock)
+    val encryptionKeys = GetServerEncryptionKey(state, verifyServer, clock)
+    val register = RegisterDevice(gateway, this.config, state, identity, keys, verifyServer, encryptionKeys, AppInfo(Platform.ANDROID, "0.1.0"), clock)
+    val upload = UploadPendingLocations(outbox, gateway, this.config, state, register, encryptionKeys, identity, clock)
     val pair = PairWithServer(verifyServer, this.config, register, clock)
     val discovery = FakeServerDiscovery()
     val failOver = FailOverServerAddress(this.config, verifyServer, discovery, clock)
@@ -538,14 +542,19 @@ class TrackerSettingsTest {
     fun `testing a connection reports latency, compatibility and clock offset`() = runTest {
         val clock = FakeClock()
         val gateway = FakeServerGateway(clock)
-        gateway.healthResponses += Outcome.Success(ServerInfo("Casa", "0.1.0", 1, T0.plusSeconds(90)))
+        val encryption = SignedEncryptionKey(anEncryptionKey(1), "signature")
+        gateway.healthResponses += Outcome.Success(ServerInfo("Casa", "0.5.0", 1, T0.plusSeconds(90), encryptionKey = encryption))
+        // A server before 0.5 speaks the same protocol version but cannot receive sealed requests.
+        gateway.healthResponses += Outcome.Success(ServerInfo("Casa", "0.4.0", 1, T0.plusSeconds(90)))
+        val test = TestServerConnection(gateway, clock, TestTimeSource())
 
-        val check = TestServerConnection(gateway, clock, TestTimeSource())(SERVER, SERVER_FINGERPRINT).successValue()
+        val check = test(SERVER, SERVER_FINGERPRINT).successValue()
 
         assertTrue(check.compatible)
         assertEquals(Duration.ZERO, check.latency)
         assertEquals(Duration.ofSeconds(90), check.clockOffset)
         assertEquals("Casa", check.server.name)
+        assertFalse(test(SERVER, SERVER_FINGERPRINT).successValue().compatible)
     }
 
     @Test
@@ -583,5 +592,142 @@ class TrackerSettingsTest {
         val plain = assertIs<DomainError.Validation>(test("http://192.168.1.10:8787", SERVER_FINGERPRINT).failureError())
         assertEquals(FieldViolation.HTTPS_REQUIRED, plain.violations.single().rule)
         assertTrue(gateway.pins.isEmpty())
+    }
+}
+
+class EndToEndEncryptionTest {
+    @Test
+    fun `registration and uploads are sealed for the key the server vouched for, which is remembered`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.enqueue(3)
+
+        assertEquals(UploadResult.Completed(sent = 3, rejected = 0, hasMore = false), fixture.upload())
+        fixture.enqueue(1)
+        assertEquals(UploadResult.Completed(sent = 1, rejected = 0, hasMore = false), fixture.upload())
+
+        assertEquals(listOf("ENC-1", "ENC-1", "ENC-1"), fixture.gateway.sealedFor)
+        assertEquals(TrustedEncryptionKey(anEncryptionKey(1), FakeServerKeys.SERVER_KEY), fixture.state.encryptionKey)
+        // Only registering asked the server to prove itself; the key served both uploads.
+        assertEquals(1, fixture.gateway.healthCalls.size)
+    }
+
+    @Test
+    fun `an encryption key the pinned server did not sign gets nothing sealed for it`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.gateway.encryptionKeySigner = fakePublicKey(DEVICE_B)
+        fixture.enqueue(2)
+
+        assertEquals(UploadResult.RetryLater(DomainError.ServerIdentityMismatch), fixture.upload())
+
+        assertTrue(fixture.gateway.registrations.isEmpty())
+        assertTrue(fixture.gateway.sealedFor.isEmpty())
+        assertNull(fixture.state.encryptionKey)
+        assertEquals(2, fixture.outbox.count())
+    }
+
+    @Test
+    fun `an older key the server once signed cannot be passed off as the current one`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.gateway.rotateEncryptionKey(2, dropOthers = true)
+        // Key 1 still carries the server's own signature, but the challenge's signature names key 2.
+        fixture.gateway.swappedEncryptionKey = anEncryptionKey(1)
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.RetryLater(DomainError.ServerIdentityMismatch), fixture.upload())
+
+        assertTrue(fixture.gateway.sealedFor.isEmpty())
+        assertNull(fixture.state.encryptionKey)
+    }
+
+    @Test
+    fun `a key already past its end by the server's own clock is not used`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.clock.current = anEncryptionKey(1).useUntil
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.RetryLater(DomainError.EncryptionUnavailable), fixture.upload())
+
+        assertTrue(fixture.gateway.sealedFor.isEmpty())
+    }
+
+    @Test
+    fun `a server without end-to-end encryption is sent nothing at all`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.gateway.encryptionKey = null
+        fixture.enqueue(2)
+
+        // Retried later: a server whose key store failed for a moment offers a key again soon.
+        assertEquals(UploadResult.RetryLater(DomainError.EncryptionUnavailable), fixture.upload())
+
+        assertTrue(fixture.gateway.registrations.isEmpty())
+        assertTrue(fixture.gateway.uploads.isEmpty())
+        assertEquals(2, fixture.outbox.count())
+    }
+
+    @Test
+    fun `when the owner rotates the key, the next batch fetches the new one and nothing is lost`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.enqueue(2)
+        fixture.upload()
+        fixture.gateway.rotateEncryptionKey(2, dropOthers = true)
+        fixture.enqueue(3)
+
+        assertEquals(UploadResult.Completed(sent = 3, rejected = 0, hasMore = false), fixture.upload())
+
+        assertEquals(listOf("ENC-1", "ENC-1", "ENC-1", "ENC-2"), fixture.gateway.sealedFor)
+        assertEquals(listOf(2, 3), fixture.gateway.uploads.map { it.size })
+        assertEquals("ENC-2", fixture.state.encryptionKey?.key?.id)
+        assertEquals(0, fixture.outbox.count())
+    }
+
+    @Test
+    fun `a key past its week is replaced before anything is sealed for it`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.enqueue(1)
+        fixture.upload()
+        fixture.gateway.rotateEncryptionKey(2, dropOthers = false)
+        fixture.clock.current = anEncryptionKey(1).useUntil
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.Completed(sent = 1, rejected = 0, hasMore = false), fixture.upload())
+
+        assertEquals(listOf("ENC-1", "ENC-1", "ENC-2"), fixture.gateway.sealedFor)
+    }
+
+    @Test
+    fun `a key that keeps changing during a run waits for the next run, keeping the outbox`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.enqueue(1)
+        fixture.upload()
+        // The server dropped every key, the new one included, by the time the batch arrives.
+        fixture.gateway.keptEncryptionKeys.clear()
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.RetryLater(DomainError.EncryptionKeyUnknown), fixture.upload())
+
+        assertEquals(1, fixture.outbox.count())
+    }
+
+    @Test
+    fun `a key remembered from another server is never used for this one`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.state.encryptionKey = TrustedEncryptionKey(anEncryptionKey(7), fakePublicKey(DEVICE_B))
+        fixture.enqueue(1)
+
+        fixture.upload()
+
+        assertEquals(listOf("ENC-1", "ENC-1"), fixture.gateway.sealedFor)
+    }
+
+    @Test
+    fun `pairing seals its registration for the key the QR's server vouched for`() = runTest {
+        val fixture = TrackerFixture(TrackerConfig(deviceName = "Pixel de Ana"))
+        val invite = PairingInvite("Casa", listOf(SERVER), FakeServerKeys.SERVER_KEY, "ticket-1", "AAAAAAAAAAAAAAAAAAAAAA", T0.plusSeconds(600))
+
+        fixture.pair(invite).successValue()
+
+        assertEquals(listOf("ENC-1"), fixture.gateway.sealedFor)
+        // The proof and the registration needed one health call between them.
+        assertEquals(1, fixture.gateway.healthCalls.size)
     }
 }

@@ -55,9 +55,14 @@ fun isValidPairingProof(secret: String, deviceId: DeviceId, publicKey: String, p
         MessageDigest.isEqual(pairingProof(secret, deviceId, publicKey).encodeToByteArray(), proof.encodeToByteArray())
     }.getOrDefault(false)
 
-/** What the server signs to answer a tracker's [challenge]: the challenge and its own time. */
-fun serverIdentityInput(challenge: String, serverTime: Instant): ByteArray =
-    "PrivateTracker-server-v1\n$challenge\n${serverTime.toEpochMilli()}".encodeToByteArray()
+/**
+ * What the server signs to answer a tracker's [challenge]: the challenge, its own time and, from 0.5,
+ * the id of the encryption key it offers in that same answer. Binding the key to a fresh challenge
+ * means an older key, even one the server once signed, cannot be passed off as the current one.
+ */
+fun serverIdentityInput(challenge: String, serverTime: Instant, encryptionKeyId: String? = null): ByteArray =
+    ("PrivateTracker-server-v1\n$challenge\n${serverTime.toEpochMilli()}" + encryptionKeyId?.let { "\n$it" }.orEmpty())
+        .encodeToByteArray()
 
 /** A server announcing itself on the local network, as a tracker found it. */
 data class DiscoveredServer(val url: String, val keyHint: String?)

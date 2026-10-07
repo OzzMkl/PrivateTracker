@@ -26,6 +26,8 @@ import org.privatetracker.core.designsystem.R as DesignR
 
 @Serializable data class DeviceDetailKey(val deviceId: String) : NavKey
 
+@Serializable data class DeviceHistoryKey(val deviceId: String) : NavKey
+
 @Serializable data object PermissionsKey : NavKey
 
 /** The server's QR code for pairing another phone. */

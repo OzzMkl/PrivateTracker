@@ -34,6 +34,9 @@
     <string name="priority_high">Alta</string>
     <string name="priority_balanced">Media</string>
     <string name="priority_low">Baja</string>
+    <string name="tracker_adaptive">Ahorrar batería en reposo</string>
+    <string name="tracker_adaptive_body">Mientras el teléfono no se mueve, pide la ubicación con menos frecuencia; vuelve a la normal en cuanto se mueve.</string>
+    <string name="tracker_still_interval">Intervalo en reposo (segundos)</string>
     <string name="tracker_start_on_boot">Reanudar al encender el teléfono</string>
     <string name="tracker_start_on_boot_body">Necesita ubicación «todo el tiempo».</string>
     <string name="tracker_batch_size">Posiciones por envío</string>

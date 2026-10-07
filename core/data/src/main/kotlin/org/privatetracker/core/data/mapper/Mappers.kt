@@ -8,12 +8,15 @@ import org.privatetracker.core.database.tracker.OutboxLocationEntity
 import org.privatetracker.core.datastore.RecordedLocationData
 import org.privatetracker.core.datastore.RegistrationData
 import org.privatetracker.core.datastore.ServerConfigData
+import org.privatetracker.core.datastore.StoredEncryptionKeyData
 import org.privatetracker.core.datastore.TrackerConfigData
+import org.privatetracker.core.datastore.TrustedEncryptionKeyData
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceSession
 import org.privatetracker.core.domain.model.DeviceWithLastLocation
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.LocationPriority
@@ -22,8 +25,10 @@ import org.privatetracker.core.domain.model.Platform
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.SessionEndReason
 import org.privatetracker.core.domain.model.SessionId
+import org.privatetracker.core.domain.model.StoredEncryptionKey
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
+import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import java.time.Instant
 
 // Storage keeps epoch milliseconds; sub-millisecond precision is dropped on purpose.
@@ -160,6 +165,8 @@ internal fun TrackerConfigData.toDomain() = TrackerConfig(
     serverKey = serverKey,
     serverAddresses = serverAddresses,
     serverFingerprint = serverFingerprint,
+    adaptiveInterval = adaptiveInterval,
+    stillIntervalSeconds = stillIntervalSeconds,
 )
 
 internal fun TrackerConfig.toData() = TrackerConfigData(
@@ -176,6 +183,8 @@ internal fun TrackerConfig.toData() = TrackerConfigData(
     serverKey = serverKey,
     serverAddresses = serverAddresses,
     serverFingerprint = serverFingerprint,
+    adaptiveInterval = adaptiveInterval,
+    stillIntervalSeconds = stillIntervalSeconds,
 )
 
 internal fun ServerConfigData.toDomain() = ServerConfig(
@@ -220,3 +229,17 @@ internal fun RecordedLocationData.toDomain() = Location(
 
 internal fun Location.toRecordedData() =
     RecordedLocationData(id.value, deviceId.value, latitude, longitude, accuracyM, recordedAt.millis())
+
+internal fun TrustedEncryptionKeyData.toDomain() =
+    TrustedEncryptionKey(EncryptionKey(id, publicKey, useUntilMillis.toInstant()), serverKey)
+
+internal fun TrustedEncryptionKey.toData() =
+    TrustedEncryptionKeyData(key.id, key.publicKey, key.useUntil.millis(), serverKey)
+
+// Server encryption keys
+
+internal fun StoredEncryptionKeyData.toDomain() =
+    StoredEncryptionKey(EncryptionKey(id, publicKey, useUntilMillis.toInstant()), createdAtMillis.toInstant(), protectedPrivateKey)
+
+internal fun StoredEncryptionKey.toData() =
+    StoredEncryptionKeyData(key.id, key.publicKey, key.useUntil.millis(), createdAt.millis(), protectedPrivateKey)

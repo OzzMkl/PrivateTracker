@@ -13,6 +13,7 @@ import org.privatetracker.core.database.tracker.OutboxDao
 import org.privatetracker.core.datastore.AppModeData
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.ServerConfigData
+import org.privatetracker.core.datastore.ServerEncryptionKeysData
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
 import org.privatetracker.core.domain.model.AppMode
@@ -21,9 +22,12 @@ import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.PendingLocation
 import org.privatetracker.core.domain.model.ServerConfig
+import org.privatetracker.core.domain.model.StoredEncryptionKey
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
+import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import org.privatetracker.core.domain.repository.AppModeRepository
+import org.privatetracker.core.domain.repository.EncryptionKeyRepository
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
 import org.privatetracker.core.domain.repository.ServerConfigRepository
@@ -68,6 +72,17 @@ class DataStoreServerConfigRepository @Inject constructor(
         store.updateData { transform(it.toDomain()).toData() }.toDomain()
 }
 
+/** The server's encryption keys; updateData makes each change atomic. */
+class DataStoreEncryptionKeyRepository @Inject constructor(
+    private val store: DataStore<ServerEncryptionKeysData>,
+) : EncryptionKeyRepository {
+    override fun observe(): Flow<List<StoredEncryptionKey>> = store.data.map { data -> data.keys.map { it.toDomain() } }
+    override suspend fun get(): List<StoredEncryptionKey> = store.data.first().keys.map { it.toDomain() }
+    override suspend fun update(transform: (List<StoredEncryptionKey>) -> List<StoredEncryptionKey>): List<StoredEncryptionKey> =
+        store.updateData { data -> ServerEncryptionKeysData(transform(data.keys.map { it.toDomain() }).map { it.toData() }) }
+            .keys.map { it.toDomain() }
+}
+
 /** updateData is atomic, so two first launches racing still end with a single id. */
 class DataStoreIdentityRepository @Inject constructor(
     private val store: DataStore<IdentityData>,
@@ -93,6 +108,12 @@ class DataStoreTrackerStateRepository @Inject constructor(
 
     override suspend fun setRegistration(registration: TrackerRegistration?) {
         store.updateData { it.copy(registration = registration?.toData()) }
+    }
+
+    override suspend fun encryptionKey(): TrustedEncryptionKey? = store.data.first().encryptionKey?.toDomain()
+
+    override suspend fun setEncryptionKey(key: TrustedEncryptionKey?) {
+        store.updateData { it.copy(encryptionKey = key?.toData()) }
     }
 }
 

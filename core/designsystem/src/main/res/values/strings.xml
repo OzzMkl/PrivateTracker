@@ -15,6 +15,8 @@
     <string name="error_device_key">No se pudo usar la clave de este teléfono</string>
     <string name="error_pairing_invalid">El código QR venció o ya lo usó otro teléfono: genera uno nuevo en el servidor</string>
     <string name="error_server_identity">El servidor en esa dirección no es el tuyo: su clave no coincide con la huella ni con el código QR</string>
+    <string name="error_encryption_key_unknown">El servidor cambió su clave de cifrado: se reintentará con la nueva</string>
+    <string name="error_encryption_unavailable">El servidor no ofrece cifrado de extremo a extremo: actualízalo a la versión 0.5 o posterior</string>
     <string name="error_server_not_trusted">Falta la huella del servidor: escríbela en Ajustes o escanea su código QR</string>
     <string name="error_signature_expired">El reloj de este teléfono y el del servidor difieren más de 5 minutos</string>
     <string name="error_signature_replayed">El servidor ya había recibido esta petición</string>

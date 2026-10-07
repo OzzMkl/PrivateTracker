@@ -45,6 +45,11 @@ data class SimulationOptions(
     val reportEvery: Duration = Duration.ofMinutes(5),
     val center: GeoPoint = GeoPoint(19.4326, -99.1332),
     val outDir: Path,
+    /**
+     * From 0.6: instead of positions as time goes by, each tracker fills this much past at once,
+     * one position per [interval] up to now, and uploads it; for testing the history screen.
+     */
+    val history: Duration? = null,
 )
 
 class UsageException(message: String) : Exception(message)

@@ -29,7 +29,14 @@ data class TrackerConfig(
      * the server by it until it has the whole [serverKey]; blank from then on.
      */
     val serverFingerprint: String = "",
+    /** From 0.6: while the phone lies still, a fix only every [stillIntervalSeconds], to save battery. */
+    val adaptiveInterval: Boolean = true,
+    val stillIntervalSeconds: Int = 300,
 ) {
+    /** How often to ask for a fix now; [still] is what the stillness detector says. */
+    fun effectiveIntervalSeconds(still: Boolean): Int =
+        if (adaptiveInterval && still) maxOf(intervalSeconds, stillIntervalSeconds) else intervalSeconds
+
     /** What this tracker trusts its server by; with nothing, it talks to no server at all. */
     val serverPin: ServerPin?
         get() = when {

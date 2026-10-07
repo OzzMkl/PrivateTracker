@@ -40,30 +40,42 @@ import org.maplibre.android.style.expressions.Expression.match
 import org.maplibre.android.style.expressions.Expression.stop
 import org.maplibre.android.style.expressions.Expression.switchCase
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
+import org.maplibre.android.style.layers.PropertyFactory.lineCap
+import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineJoin
+import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
+import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import org.privatetracker.core.designsystem.theme.LocalStatusColors
 import org.privatetracker.core.map.MapCamera
 import org.privatetracker.core.map.MapMarker
+import org.privatetracker.core.map.MapPoint
+import org.privatetracker.core.map.MapTrack
 import org.privatetracker.core.map.MarkerStyle
 import org.privatetracker.core.map.TileSourceConfig
 import kotlin.coroutines.resume
 
 private const val MARKER_SOURCE_ID = "markers"
 private const val MARKER_LAYER_ID = "markers"
+private const val TRACK_SOURCE_ID = "tracks"
+private const val TRACK_LAYER_ID = "tracks"
 private const val PROP_ID = "id"
 private const val PROP_STYLE = "style"
 private const val PROP_SELECTED = "selected"
 private const val SINGLE_MARKER_ZOOM = 15.0
 
 @Immutable
-private data class MarkerColors(val online: Int, val stale: Int, val offline: Int, val self: Int)
+private data class MarkerColors(val online: Int, val stale: Int, val offline: Int, val self: Int, val track: Int)
 
 /**
  * MapLibre's MapView inside Compose. Markers are circles in a GeoJSON layer rather than symbols,
@@ -75,6 +87,8 @@ private data class MarkerColors(val online: Int, val stale: Int, val offline: In
 @Composable
 internal fun MapLibreMapView(
     markers: List<MapMarker>,
+    tracks: List<MapTrack>,
+    onTracksDrawn: () -> Unit,
     camera: MapCamera,
     selectedId: String?,
     interactive: Boolean,
@@ -95,8 +109,10 @@ internal fun MapLibreMapView(
         stale = statusColors.warning.toArgb(),
         offline = statusColors.neutral.toArgb(),
         self = MaterialTheme.colorScheme.primary.toArgb(),
+        track = MaterialTheme.colorScheme.primary.toArgb(),
     )
     val currentOnMarkerClick by rememberUpdatedState(onMarkerClick)
+    val currentOnTracksDrawn by rememberUpdatedState(onTracksDrawn)
     val currentOnMapClick by rememberUpdatedState(onMapClick)
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
@@ -124,6 +140,8 @@ internal fun MapLibreMapView(
         style = ready.awaitStyle(
             Style.Builder()
                 .fromJson(rasterStyleJson(tiles))
+                .withSource(GeoJsonSource(TRACK_SOURCE_ID))
+                .withLayer(trackLayer(colors))
                 .withSource(GeoJsonSource(MARKER_SOURCE_ID))
                 .withLayer(markerLayer(colors)),
         )
@@ -139,13 +157,24 @@ internal fun MapLibreMapView(
         style?.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)?.setGeoJson(markers.toFeatures(selectedId))
     }
 
-    // Fitting follows the set of markers, not their positions, so a device that moves does not undo the user's panning.
-    val cameraKey: Any = if (camera is MapCamera.FitMarkers) markers.map { it.id }.toSet() else camera
+    LaunchedEffect(style, tracks) {
+        val source = style?.getSourceAs<GeoJsonSource>(TRACK_SOURCE_ID) ?: return@LaunchedEffect
+        source.setGeoJson(tracks.toFeatures())
+        if (tracks.isNotEmpty()) {
+            // MapLibre cuts the line into tiles on a worker thread: drawn means the first complete frame after that.
+            mapView.awaitFullyRenderedFrame()
+            currentOnTracksDrawn()
+        }
+    }
+
+    // Fitting follows the set of markers and tracks, not their positions, so a device that moves does not undo the user's panning.
+    val cameraKey: Any = if (camera is MapCamera.FitMarkers) markers.map { it.id }.toSet() to tracks else camera
     LaunchedEffect(style, cameraKey) {
         val ready = map ?: return@LaunchedEffect
         if (style == null) return@LaunchedEffect
         mapView.awaitLayout()
-        ready.moveTo(camera, markers, padding = (touchSlop * 2).toInt())
+        val points = markers.map { MapPoint(it.latitude, it.longitude) } + tracks.flatMap { track -> track.segments.flatten() }
+        ready.moveTo(camera, points, padding = (touchSlop * 2).toInt())
     }
 
     AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
@@ -181,6 +210,15 @@ private fun MapViewLifecycle(mapView: MapView, owner: LifecycleOwner) {
     }
 }
 
+private fun trackLayer(colors: MarkerColors): LineLayer =
+    LineLayer(TRACK_LAYER_ID, TRACK_SOURCE_ID).withProperties(
+        lineColor(colors.track),
+        lineWidth(4f),
+        lineOpacity(0.85f),
+        lineJoin(Property.LINE_JOIN_ROUND),
+        lineCap(Property.LINE_CAP_ROUND),
+    )
+
 private fun markerLayer(colors: MarkerColors): CircleLayer =
     CircleLayer(MARKER_LAYER_ID, MARKER_SOURCE_ID).withProperties(
         circleColor(
@@ -190,6 +228,8 @@ private fun markerLayer(colors: MarkerColors): CircleLayer =
                 stop(MarkerStyle.ONLINE.name, color(colors.online)),
                 stop(MarkerStyle.STALE.name, color(colors.stale)),
                 stop(MarkerStyle.SELF.name, color(colors.self)),
+                stop(MarkerStyle.ROUTE_START.name, color(colors.offline)),
+                stop(MarkerStyle.ROUTE_END.name, color(colors.track)),
             ),
         ),
         circleRadius(switchCase(eq(get(PROP_SELECTED), true), literal(11f), literal(8f))),
@@ -208,15 +248,28 @@ private fun List<MapMarker>.toFeatures(selectedId: String?): FeatureCollection =
         },
     )
 
-private fun MapLibreMap.moveTo(camera: MapCamera, markers: List<MapMarker>, padding: Int) {
+/** Each track as one MultiLineString, so stretches are not joined. */
+private fun List<MapTrack>.toFeatures(): FeatureCollection =
+    FeatureCollection.fromFeatures(
+        map { track ->
+            Feature.fromGeometry(
+                MultiLineString.fromLngLats(track.segments.map { segment -> segment.map { Point.fromLngLat(it.longitude, it.latitude) } }),
+            ).apply { addStringProperty(PROP_ID, track.id) }
+        },
+    )
+
+private fun MapLibreMap.moveTo(camera: MapCamera, points: List<MapPoint>, padding: Int) {
     when (camera) {
         is MapCamera.Centered -> moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(camera.latitude, camera.longitude), camera.zoom))
-        MapCamera.FitMarkers -> when (markers.size) {
-            0 -> Unit
-            1 -> moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(markers[0].latitude, markers[0].longitude), SINGLE_MARKER_ZOOM))
-            else -> {
-                val bounds = LatLngBounds.Builder().includes(markers.map { LatLng(it.latitude, it.longitude) }).build()
-                moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, padding))
+        MapCamera.FitMarkers -> {
+            val distinct = points.distinct()
+            when (distinct.size) {
+                0 -> Unit
+                1 -> moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(distinct[0].latitude, distinct[0].longitude), SINGLE_MARKER_ZOOM))
+                else -> {
+                    val bounds = LatLngBounds.Builder().includes(distinct.map { LatLng(it.latitude, it.longitude) }).build()
+                    moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, padding))
+                }
             }
         }
     }
@@ -228,6 +281,18 @@ private suspend fun MapView.awaitMap(): MapLibreMap = suspendCancellableCoroutin
 
 private suspend fun MapLibreMap.awaitStyle(builder: Style.Builder): Style = suspendCancellableCoroutine { continuation ->
     setStyle(builder) { continuation.resume(it) }
+}
+
+private suspend fun MapView.awaitFullyRenderedFrame() = suspendCancellableCoroutine { continuation ->
+    val listener = object : MapView.OnDidFinishRenderingFrameListener {
+        override fun onDidFinishRenderingFrame(fully: Boolean, frameEncodingTime: Double, frameRenderingTime: Double) {
+            if (!fully) return
+            removeOnDidFinishRenderingFrameListener(this)
+            if (continuation.isActive) continuation.resume(Unit)
+        }
+    }
+    addOnDidFinishRenderingFrameListener(listener)
+    continuation.invokeOnCancellation { post { removeOnDidFinishRenderingFrameListener(listener) } }
 }
 
 private suspend fun MapView.awaitLayout() {

@@ -21,6 +21,7 @@ import org.privatetracker.core.domain.model.UploadResult
 import org.privatetracker.core.domain.port.DeviceKeys
 import org.privatetracker.core.domain.port.ServerGateway
 import org.privatetracker.core.domain.usecase.common.GetOrCreateDeviceIdentity
+import org.privatetracker.core.domain.usecase.tracker.GetServerEncryptionKey
 import org.privatetracker.core.domain.usecase.tracker.RecordLocation
 import org.privatetracker.core.domain.usecase.tracker.RegisterDevice
 import org.privatetracker.core.domain.usecase.tracker.UploadPendingLocations
@@ -64,13 +65,16 @@ class SimulatedTracker(
             deviceName = name,
             intervalSeconds = options.interval.seconds.toInt().coerceAtLeast(1),
             batchSize = options.batchSize,
-            maxQueueSize = options.maxQueueSize,
+            // A whole history waits in the queue before it goes out.
+            maxQueueSize = maxOf(options.maxQueueSize, options.history?.let { (it.toMillis() / options.interval.toMillis()).toInt() + 1 } ?: 0),
             trackingEnabled = true,
         ),
     )
     private val state = MemoryTrackerState()
     private val identity = GetOrCreateDeviceIdentity(FixedIdentity(deviceId), ids)
     private val network = FaultInjectingGateway(RecordingGateway(gateway, ledger, stats), options.faults, Random(random.nextLong()), stats)
+    private val verifyServer = VerifyServerIdentity(network, EcdsaP256)
+    private val encryptionKeys = GetServerEncryptionKey(state, verifyServer, clock)
     private val record = RecordLocation(outbox, state, config, identity, SimulatedBattery(Random(random.nextLong())), LocationValidator(clock), ids)
     private val upload = UploadPendingLocations(
         outbox = outbox,
@@ -78,8 +82,9 @@ class SimulatedTracker(
         trackerConfig = config,
         trackerState = state,
         registerDevice = RegisterDevice(
-            network, config, state, identity, keys, VerifyServerIdentity(network, EcdsaP256), AppInfo(Platform.OTHER, SIMULATOR_VERSION), clock,
+            network, config, state, identity, keys, verifyServer, encryptionKeys, AppInfo(Platform.OTHER, SIMULATOR_VERSION), clock,
         ),
+        encryptionKeys = encryptionKeys,
         identity = identity,
         clock = clock,
     )
@@ -101,6 +106,23 @@ class SimulatedTracker(
             }
             if (!uploadLock.isLocked) launch { uploadNow() }
             delay(options.interval.toMillis())
+        }
+    }
+
+    /** Fills [span] of past at once, one position per interval up to now, all queued for upload. */
+    suspend fun recordHistory(span: Duration) {
+        val routine = DailyRoutine(options.center, Random(random.nextLong()))
+        val now = clock.now()
+        var at = now.minus(span)
+        while (at.isBefore(now)) {
+            when (val result = record(routine.at(at))) {
+                is RecordResult.Recorded -> {
+                    ledger.generated(result.location)
+                    stats.generated.incrementAndGet()
+                }
+                is RecordResult.Skipped -> stats.skipped.incrementAndGet()
+            }
+            at = at.plus(options.interval)
         }
     }
 

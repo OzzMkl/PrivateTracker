@@ -2,7 +2,7 @@ package org.privatetracker.core.map
 
 import androidx.compose.runtime.Immutable
 
-enum class MarkerStyle { ONLINE, STALE, OFFLINE, SELF }
+enum class MarkerStyle { ONLINE, STALE, OFFLINE, SELF, ROUTE_START, ROUTE_END }
 
 /** A point on the map. [id] comes back in the click callback. */
 @Immutable
@@ -13,9 +13,19 @@ data class MapMarker(
     val style: MarkerStyle,
 )
 
-/** Where the map looks. The camera moves when this value changes, and for [FitMarkers] when markers come or go. */
+@Immutable
+data class MapPoint(val latitude: Double, val longitude: Double)
+
+/** A route drawn as a line, one per stretch: [segments] are not joined to each other. */
+@Immutable
+data class MapTrack(val id: String, val segments: List<List<MapPoint>>)
+
+/**
+ * Where the map looks. The camera moves when this value changes, and for [FitMarkers] when markers
+ * or tracks come or go.
+ */
 sealed interface MapCamera {
-    /** Shows every marker; a single marker is shown up close. */
+    /** Shows every marker and track; a single marker is shown up close. */
     data object FitMarkers : MapCamera
 
     data class Centered(val latitude: Double, val longitude: Double, val zoom: Double = 15.0) : MapCamera

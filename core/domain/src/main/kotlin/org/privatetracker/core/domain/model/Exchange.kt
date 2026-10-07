@@ -44,13 +44,17 @@ data class TrackerRegistration(
     val registeredAt: Instant,
 )
 
-/** Answer of the server health endpoint. [identity] answers the challenge, when the tracker sent one. */
+/**
+ * Answer of the server health endpoint. [identity] answers the challenge, when the tracker sent one.
+ * [encryptionKey] is what trackers seal their requests for; servers before 0.5 offer none.
+ */
 data class ServerInfo(
     val name: String,
     val version: String,
     val protocolVersion: Int,
     val serverTime: Instant,
     val identity: ServerIdentity? = null,
+    val encryptionKey: SignedEncryptionKey? = null,
 )
 
 data class ConnectionCheck(

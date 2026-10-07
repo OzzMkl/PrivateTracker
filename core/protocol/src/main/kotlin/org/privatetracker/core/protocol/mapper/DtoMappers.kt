@@ -12,6 +12,7 @@ import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceOverview
 import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.DeviceSession
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationId
@@ -22,10 +23,12 @@ import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
 import org.privatetracker.core.domain.model.ServerIdentity
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.SignedEncryptionKey
 import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.protocol.v1.ErrorCode
 import org.privatetracker.core.protocol.v1.dto.DeviceDetailDto
 import org.privatetracker.core.protocol.v1.dto.DeviceSummaryDto
+import org.privatetracker.core.protocol.v1.dto.EncryptionKeyDto
 import org.privatetracker.core.protocol.v1.dto.HealthResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchResponse
 import org.privatetracker.core.protocol.v1.dto.LocationDto
@@ -138,14 +141,21 @@ fun RegisterDeviceResponse.toDomain(): Outcome<RegistrationResult> {
 
 // Health
 
-fun ServerInfo.toDto(): HealthResponse =
-    HealthResponse("ok", name, version, protocolVersion, WireTime.format(serverTime), identity?.publicKey, identity?.signature)
+fun ServerInfo.toDto(): HealthResponse = HealthResponse(
+    "ok", name, version, protocolVersion, WireTime.format(serverTime), identity?.publicKey, identity?.signature, encryptionKey?.toDto(),
+)
 
 fun HealthResponse.toDomain(): Outcome<ServerInfo> {
     val time = WireTime.parse(serverTime) ?: return invalid("server_time")
     val identity = if (serverKey != null && signature != null) ServerIdentity(serverKey, signature) else null
-    return ServerInfo(serverName, serverVersion, protocolVersion, time, identity).asSuccess()
+    val encryption = encryptionKey?.let { dto ->
+        val useUntil = WireTime.parse(dto.useUntil) ?: return invalid("encryption_key.use_until")
+        SignedEncryptionKey(EncryptionKey(dto.id, dto.publicKey, useUntil), dto.signature)
+    }
+    return ServerInfo(serverName, serverVersion, protocolVersion, time, identity, encryption).asSuccess()
 }
+
+fun SignedEncryptionKey.toDto(): EncryptionKeyDto = EncryptionKeyDto(key.id, key.publicKey, WireTime.format(key.useUntil), signature)
 
 // Read API
 
@@ -187,6 +197,7 @@ fun ProblemDetails?.toDomainError(httpStatus: Int, retryAfterSeconds: Long?): Do
         ErrorCode.DEVICE_PENDING_APPROVAL -> DomainError.DevicePendingApproval
         ErrorCode.DEVICE_REJECTED -> DomainError.DeviceRejected
         ErrorCode.PAIRING_INVALID -> DomainError.PairingInvalid
+        ErrorCode.ENCRYPTION_KEY_UNKNOWN -> DomainError.EncryptionKeyUnknown
         else -> AuthFailure.entries.firstOrNull { it.code == this?.code }?.let(DomainError::AuthenticationFailed)
             ?: DomainError.Http(httpStatus, this?.code, retryAfterSeconds)
     }

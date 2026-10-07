@@ -14,5 +14,7 @@
     -->
     <device-transfer>
         <exclude domain="file" path="datastore/identity.json" />
+        <!-- The server's encryption keys are wrapped by a Keystore key that stays behind, so they would not open. -->
+        <exclude domain="file" path="datastore/server_encryption_keys.json" />
     </device-transfer>
 </data-extraction-rules>

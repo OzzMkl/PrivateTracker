@@ -18,6 +18,7 @@ import kotlin.system.exitProcess
 private val USAGE = """
     Uso:
       simulator run --server URL --fingerprint HUELLA [opciones]
+      simulator history --server URL --fingerprint HUELLA [opciones]
       simulator verify --run CARPETA (--pull | --db ARCHIVO) [opciones]
 
     run: Trackers simulados envían posiciones al servidor y anotan cada una en CARPETA/ledger.csv.
@@ -35,6 +36,13 @@ private val USAGE = """
       --center LAT,LON     centro de las rutas simuladas (19.4326,-99.1332)
       --out CARPETA        dónde guardar ledger.csv y summary.txt (simulator-runs/<fecha-hora>)
 
+    history: llena días de historial de una vez (una rutina de casa, trabajo y fines de semana) y lo sube.
+      --server, --fingerprint, --center y --out como en run
+      --days N             días de historial hasta ahora, 1 a 90 (30)
+      --interval D         una posición cada D (60s)
+      --trackers N         Trackers, cada uno con su propio historial (1)
+      --drain-timeout D    tiempo máximo para subirlo (60m)
+
     verify: compara el ledger de una corrida con server.db.
       --run CARPETA        carpeta de la corrida, la que contiene ledger.csv (obligatoria)
       --pull               copia server.db del teléfono con adb (solo builds debug)
@@ -50,6 +58,7 @@ fun main(args: Array<String>) {
     val code = try {
         when (args.firstOrNull()) {
             "run" -> runCommand(CommandLine(args.drop(1)))
+            "history" -> runCommand(CommandLine(args.drop(1)), history = true)
             "verify" -> verifyCommand(CommandLine(args.drop(1), switches = setOf("--pull")))
             null, "help", "--help", "-h" -> {
                 println(USAGE)
@@ -68,7 +77,7 @@ fun main(args: Array<String>) {
     exitProcess(code)
 }
 
-private fun runCommand(cli: CommandLine): Int {
+private fun runCommand(cli: CommandLine, history: Boolean = false): Int {
     val serverUrl = TrackerConfigValidator.normalizeServerUrl(cli.required("--server"))
     TrackerConfigValidator.validateServerUrl(serverUrl)?.let {
         throw UsageException("URL de servidor inválida: $serverUrl (ejemplo: https://192.168.1.50:8787)")
@@ -77,23 +86,39 @@ private fun runCommand(cli: CommandLine): Int {
     TrackerConfigValidator.validateServerFingerprint(fingerprint)?.let {
         throw UsageException("Huella inválida: $fingerprint (16 dígitos hexadecimales, como 3F9A-01BC-77D2-E410)")
     }
-    val options = SimulationOptions(
-        serverUrl = serverUrl,
-        serverFingerprint = fingerprint,
-        trackers = cli.int("--trackers", 10, 1..1_000),
-        interval = cli.duration("--interval", "60s"),
-        duration = cli.duration("--duration", "24h"),
-        batchSize = cli.int("--batch-size", 50, TrackerConfigValidator.BATCH_SIZE),
-        maxQueueSize = cli.int("--max-queue", 10_000, TrackerConfigValidator.MAX_QUEUE_SIZE),
-        faults = FaultPlan(
-            dropRate = cli.probability("--drop"),
-            lostAckRate = cli.probability("--lost-ack"),
-        ),
-        drainTimeout = cli.duration("--drain-timeout", "10m"),
-        reportEvery = cli.duration("--report-every", "5m"),
-        center = cli.string("--center")?.let(::parseCenter) ?: GeoPoint(19.4326, -99.1332),
-        outDir = Path.of(cli.string("--out") ?: "simulator-runs/" + LocalDateTime.now().format(RUN_NAME)),
-    )
+    val options = if (history) {
+        SimulationOptions(
+            serverUrl = serverUrl,
+            serverFingerprint = fingerprint,
+            trackers = cli.int("--trackers", 1, 1..100),
+            interval = cli.duration("--interval", "60s"),
+            // As fast as the server allows: whole batches only.
+            batchSize = TrackerConfigValidator.BATCH_SIZE.last,
+            drainTimeout = cli.duration("--drain-timeout", "60m"),
+            reportEvery = cli.duration("--report-every", "1m"),
+            center = cli.string("--center")?.let(::parseCenter) ?: GeoPoint(19.4326, -99.1332),
+            outDir = Path.of(cli.string("--out") ?: "simulator-runs/" + LocalDateTime.now().format(RUN_NAME)),
+            history = java.time.Duration.ofDays(cli.int("--days", 30, 1..90).toLong()),
+        )
+    } else {
+        SimulationOptions(
+            serverUrl = serverUrl,
+            serverFingerprint = fingerprint,
+            trackers = cli.int("--trackers", 10, 1..1_000),
+            interval = cli.duration("--interval", "60s"),
+            duration = cli.duration("--duration", "24h"),
+            batchSize = cli.int("--batch-size", 50, TrackerConfigValidator.BATCH_SIZE),
+            maxQueueSize = cli.int("--max-queue", 10_000, TrackerConfigValidator.MAX_QUEUE_SIZE),
+            faults = FaultPlan(
+                dropRate = cli.probability("--drop"),
+                lostAckRate = cli.probability("--lost-ack"),
+            ),
+            drainTimeout = cli.duration("--drain-timeout", "10m"),
+            reportEvery = cli.duration("--report-every", "5m"),
+            center = cli.string("--center")?.let(::parseCenter) ?: GeoPoint(19.4326, -99.1332),
+            outDir = Path.of(cli.string("--out") ?: "simulator-runs/" + LocalDateTime.now().format(RUN_NAME)),
+        )
+    }
     cli.rejectUnknown()
 
     val clients = mutableListOf<OkHttpPinnedClients>()

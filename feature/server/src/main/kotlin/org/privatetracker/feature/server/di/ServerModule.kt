@@ -14,6 +14,7 @@ import org.privatetracker.core.domain.repository.PairingTicketStore
 import org.privatetracker.core.domain.port.ServerController
 import org.privatetracker.core.domain.repository.ServerConfigRepository
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
+import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
@@ -47,6 +48,7 @@ object ServerModule {
         clock: Clock,
         config: ServerConfigRepository,
         serverKeys: ServerKeys,
+        encryptionKeys: EncryptionKeyRing,
         register: RegisterOrUpdateDevice,
         authenticate: AuthenticateDevice,
         ingest: IngestLocationBatch,
@@ -58,6 +60,7 @@ object ServerModule {
         clock = clock,
         serverConfig = config,
         serverKeys = serverKeys,
+        encryptionKeys = encryptionKeys,
         registerOrUpdateDevice = register,
         authenticateDevice = authenticate,
         ingestLocationBatch = ingest,

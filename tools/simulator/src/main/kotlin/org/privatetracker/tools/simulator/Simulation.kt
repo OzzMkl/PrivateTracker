@@ -77,21 +77,29 @@ class Simulation(
         out.println()
 
         val started = TimeSource.Monotonic.markNow()
-        val running = launch { trackers.forEach { tracker -> launch { tracker.run() } } }
         val progress = launch {
             while (true) {
                 delay(options.reportEvery.toMillis())
                 out.println("[${formatDuration(started.elapsedNow().toJavaDuration())}] ${progressLine(trackers)}")
             }
         }
-        val stoppedEarly = withTimeoutOrNull(options.duration.toMillis()) { stop.await() } != null
-        running.cancelAndJoin()
-        val ranFor = started.elapsedNow().toJavaDuration()
+        val history = options.history
+        val stoppedEarly = if (history != null) {
+            trackers.forEach { it.recordHistory(history) }
+            out.println("Historial generado: ${trackers.sumOf { it.stats.generated.get() }} posiciones. Subiéndolo…")
+            false
+        } else {
+            val running = launch { trackers.forEach { tracker -> launch { tracker.run() } } }
+            withTimeoutOrNull(options.duration.toMillis()) { stop.await() }.also { running.cancelAndJoin() } != null
+        }
+        val generatedFor = started.elapsedNow().toJavaDuration()
 
         out.println()
-        out.println(if (stoppedEarly) "Detenida a mano. Vaciando las colas…" else "Tiempo cumplido. Vaciando las colas…")
+        if (history == null) out.println(if (stoppedEarly) "Detenida a mano. Vaciando las colas…" else "Tiempo cumplido. Vaciando las colas…")
         val drained = trackers.map { async { it.drain(options.drainTimeout) } }.awaitAll()
         progress.cancelAndJoin()
+        // A history is generated in a moment; what takes time is sending it.
+        val ranFor = if (history != null) started.elapsedNow().toJavaDuration() else generatedFor
         ledger.finished(RunEnd(ranFor, stoppedEarly, drained = drained.all { it }))
         ledger.close()
         if (!drained.all { it }) {
@@ -133,10 +141,18 @@ class Simulation(
         if (check.clockOffset.abs() > CLOCK_WARNING) {
             out.println("Aviso: los relojes difieren más de ${CLOCK_WARNING.seconds} s; conviene sincronizarlos.")
         }
-        out.println(
-            "${options.trackers} Trackers, una posición cada ${formatDuration(options.interval)} " +
-                "durante ${formatDuration(options.duration)}. Ctrl+C termina antes y vacía las colas.",
-        )
+        val history = options.history
+        if (history != null) {
+            out.println(
+                "${options.trackers} Tracker(s) con ${history.toDays()} días de historial, una posición cada ${formatDuration(options.interval)}. " +
+                    "Se suben tan rápido como lo permite el límite de peticiones del servidor.",
+            )
+        } else {
+            out.println(
+                "${options.trackers} Trackers, una posición cada ${formatDuration(options.interval)} " +
+                    "durante ${formatDuration(options.duration)}. Ctrl+C termina antes y vacía las colas.",
+            )
+        }
         if (options.faults != FaultPlan()) {
             out.println("Fallas inyectadas: ${percent(options.faults.dropRate)} de envíos sin salir, ${percent(options.faults.lostAckRate)} sin acuse.")
         }

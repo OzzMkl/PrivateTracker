@@ -128,7 +128,15 @@ private fun StatusCard(status: TrackingStatus, keyFingerprint: String?, busy: Bo
             InfoRow(stringResource(R.string.tracker_server_fingerprint), it)
         }
         InfoRow(stringResource(R.string.tracker_device_name), status.config.deviceName.ifBlank { "—" })
-        InfoRow(stringResource(R.string.tracker_interval), stringResource(R.string.tracker_interval_value, status.config.intervalSeconds))
+        val still = status.running && status.activity.still
+        InfoRow(
+            stringResource(R.string.tracker_interval),
+            if (still) {
+                stringResource(R.string.tracker_interval_still, status.config.effectiveIntervalSeconds(still = true))
+            } else {
+                stringResource(R.string.tracker_interval_value, status.config.intervalSeconds)
+            },
+        )
         InfoRow(stringResource(DesignR.string.key_fingerprint), keyFingerprint ?: "…")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!status.running) {

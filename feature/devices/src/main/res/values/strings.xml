@@ -63,4 +63,33 @@
     <string name="cancel">Cancelar</string>
     <string name="save">Guardar</string>
     <string name="more">Más opciones</string>
+
+    <!-- Historial -->
+    <string name="device_history_open">Ver recorridos</string>
+    <string name="device_history_title">Historial</string>
+    <string name="device_history_title_named">Historial de %1$s</string>
+    <string name="device_history_today">Hoy</string>
+    <string name="device_history_yesterday">Ayer</string>
+    <string name="device_history_7_days">7 días</string>
+    <string name="device_history_30_days">30 días</string>
+    <string name="device_history_days">Fechas</string>
+    <string name="device_history_show">Mostrar</string>
+    <string name="device_history_empty">No hay posiciones en este periodo.</string>
+    <string name="device_history_summary">Recorrido</string>
+    <plurals name="device_history_positions">
+        <item quantity="one">%d posición</item>
+        <item quantity="many">%d posiciones</item>
+        <item quantity="other">%d posiciones</item>
+    </plurals>
+    <string name="device_history_km">%1$.1f km</string>
+    <string name="device_history_m">%1$.0f m</string>
+    <string name="device_history_span">Del %1$s al %2$s</string>
+    <string name="device_history_export_gpx">Exportar GPX</string>
+    <string name="device_history_export_csv">Exportar CSV</string>
+    <plurals name="device_history_exported">
+        <item quantity="one">Se guardó %d posición</item>
+        <item quantity="many">Se guardaron %d posiciones</item>
+        <item quantity="other">Se guardaron %d posiciones</item>
+    </plurals>
+    <string name="device_history_export_failed">No se pudo guardar el archivo</string>
 </resources>

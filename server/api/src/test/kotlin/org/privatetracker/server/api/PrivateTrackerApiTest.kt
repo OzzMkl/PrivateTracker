@@ -12,13 +12,17 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.DeserializationStrategy
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.Platform
+import org.privatetracker.core.domain.model.encryptionKeyInput
+import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.model.pairingProof
 import org.privatetracker.core.domain.model.serverIdentityInput
 import org.privatetracker.core.domain.service.SessionTracker
@@ -26,6 +30,7 @@ import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.DEVICE_B
 import org.privatetracker.core.domain.testing.FakeClock
 import org.privatetracker.core.domain.testing.ImmediateTransactionRunner
+import org.privatetracker.core.domain.testing.InMemoryEncryptionKeyRepository
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.InMemoryServerStore
 import org.privatetracker.core.domain.testing.SequentialIdGenerator
@@ -34,6 +39,7 @@ import org.privatetracker.core.domain.testing.locationId
 import org.privatetracker.core.domain.testing.successValue
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
+import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
@@ -42,12 +48,15 @@ import org.privatetracker.core.domain.usecase.server.VerifyRequestSignature
 import org.privatetracker.core.domain.validation.LocationValidator
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.crypto.InMemoryDeviceKeys
+import org.privatetracker.core.protocol.crypto.InMemoryEncryptionKeyVault
+import org.privatetracker.core.protocol.crypto.P256
 import org.privatetracker.core.protocol.crypto.InMemoryServerKeys
 import org.privatetracker.core.protocol.mapper.toDomain
 import org.privatetracker.core.protocol.mapper.toDto
 import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.protocol.v1.ProtocolJson
 import org.privatetracker.core.protocol.v1.RequestSignature
+import org.privatetracker.core.protocol.v1.SealedBodies
 import org.privatetracker.core.protocol.v1.dto.DevicesResponse
 import org.privatetracker.core.protocol.v1.dto.HealthResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchRequest
@@ -57,13 +66,16 @@ import org.privatetracker.core.protocol.v1.dto.PairingClaimDto
 import org.privatetracker.core.protocol.v1.dto.ProblemDetails
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceRequest
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceResponse
+import org.privatetracker.core.protocol.v1.dto.SealedRequestDto
 import org.privatetracker.server.api.auth.InMemoryNonceRegistry
 import org.privatetracker.server.api.auth.InMemoryPairingTicketStore
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
+import java.util.IdentityHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -74,7 +86,11 @@ class PrivateTrackerApiTest {
     private val config = InMemoryServerConfigRepository()
     private val keys = InMemoryDeviceKeys()
     private val serverKeys = InMemoryServerKeys()
+    private val encryptionKeys = EncryptionKeyRing(InMemoryEncryptionKeyRepository(), InMemoryEncryptionKeyVault(), serverKeys, clock)
     private val tickets = InMemoryPairingTicketStore()
+
+    /** How to open the answer of each sealed request sent. */
+    private val sealedRequests = IdentityHashMap<HttpResponse, SealedBodies.SealedRequest>()
     private var local = true
     private var shuttingDown = false
     private var requests = 0
@@ -88,6 +104,7 @@ class PrivateTrackerApiTest {
             clock = clock,
             serverConfig = config,
             serverKeys = serverKeys,
+            encryptionKeys = encryptionKeys,
             registerOrUpdateDevice = RegisterOrUpdateDevice(
                 store, config, sessions, EcdsaP256, verifySignature, tickets, ImmediateTransactionRunner, clock,
             ),
@@ -110,8 +127,9 @@ class PrivateTrackerApiTest {
     }
 
     /**
-     * A POST from [device], signed as a tracker signs it. The other parameters break the signature in
-     * one way each: another device's key, another time, a reused nonce, another body, or none at all.
+     * A POST from [device], sealed for the server's current encryption key and signed as a tracker does
+     * both. The other parameters break one thing each: another device's key, another time, a reused
+     * nonce, other signed bytes, no signature at all, or no sealing, as from a tracker before 0.5.
      */
     private suspend fun ApplicationTestBuilder.signedPost(
         path: String,
@@ -120,17 +138,26 @@ class PrivateTrackerApiTest {
         keyOf: DeviceId = device,
         signedAt: Instant = clock.now(),
         nonce: String = "nonce-${++nonces}",
-        signedBody: String = body,
+        signedBody: ByteArray? = null,
         authorization: String? = null,
         unsigned: Boolean = false,
+        headerDevice: String = device.value,
+        sealed: Boolean = true,
+        sealFor: EncryptionKey? = null,
     ): HttpResponse {
-        val input = RequestSignature.signingInput("POST", path, device.value, signedAt.epochSecond, nonce, signedBody.encodeToByteArray())
-        val signature = RequestSignature.header(device.value, signedAt.epochSecond, nonce, keys.sign(keyOf, input))
+        val sealedRequest = if (sealed) {
+            assertNotNull(SealedBodies.seal(sealFor ?: encryptionKeys.current().key, "POST", path, body.encodeToByteArray()))
+        } else {
+            null
+        }
+        val bytes = sealedRequest?.body ?: body.encodeToByteArray()
+        val input = RequestSignature.signingInput("POST", path, headerDevice, signedAt.epochSecond, nonce, signedBody ?: bytes)
+        val signature = RequestSignature.header(headerDevice, signedAt.epochSecond, nonce, keys.sign(keyOf, input))
         return client.post(path) {
             contentType(ContentType.Application.Json)
             if (!unsigned) header(HttpHeaders.Authorization, authorization ?: signature)
-            setBody(body)
-        }
+            setBody(bytes)
+        }.also { response -> sealedRequest?.let { sealedRequests[response] = it } }
     }
 
     private suspend fun registerBody(device: DeviceId = DEVICE_A, keyOf: DeviceId = device): String =
@@ -151,8 +178,13 @@ class PrivateTrackerApiTest {
     private fun batchBody(vararg locations: LocationDto): String =
         ProtocolJson.encodeToString(LocationBatchRequest.serializer(), LocationBatchRequest(locations.toList()))
 
-    private suspend fun <T> HttpResponse.decode(deserializer: DeserializationStrategy<T>): T =
-        ProtocolJson.decodeFromString(deserializer, bodyAsText())
+    /** Opens the answer first when it answers a sealed request: only a problem comes back unsealed. */
+    private suspend fun <T> HttpResponse.decode(deserializer: DeserializationStrategy<T>): T {
+        val bytes = bodyAsBytes()
+        val request = sealedRequests[this]?.takeIf { status.isSuccess() }
+        val plain = request?.let { assertNotNull(SealedBodies.openResponse(it, bytes), "the answer does not open") } ?: bytes
+        return ProtocolJson.decodeFromString(deserializer, plain.decodeToString())
+    }
 
     private suspend fun HttpResponse.problem(): ProblemDetails {
         assertEquals(ApiV1.PROBLEM_CONTENT_TYPE, headers[HttpHeaders.ContentType]?.substringBefore(';'))
@@ -180,10 +212,83 @@ class PrivateTrackerApiTest {
         val identity = assertNotNull(info.identity)
         assertEquals(serverKeys.publicKey(), identity.publicKey)
         val signature = Base64.getDecoder().decode(identity.signature)
-        assertTrue(EcdsaP256.verify(identity.publicKey, serverIdentityInput(challenge, info.serverTime), signature))
+        // It also names the encryption key offered in the same answer.
+        val offered = assertNotNull(info.encryptionKey).key.id
+        assertTrue(EcdsaP256.verify(identity.publicKey, serverIdentityInput(challenge, info.serverTime, offered), signature))
         // No challenge, or a malformed one: nothing signed.
         assertNull(client.get(ApiV1.HEALTH).decode(HealthResponse.serializer()).signature)
         assertNull(client.get(ApiV1.HEALTH) { parameter(ApiV1.CHALLENGE_PARAM, "short") }.decode(HealthResponse.serializer()).signature)
+    }
+
+    @Test
+    fun `health hands out a P-256 encryption key that the server's identity key signs`() = api {
+        val health = client.get(ApiV1.HEALTH).decode(HealthResponse.serializer()).toDomain().successValue()
+
+        val signed = assertNotNull(health.encryptionKey)
+        assertNotNull(P256.decodePublicKey(signed.key.publicKey))
+        assertEquals(keyFingerprint(signed.key.publicKey), signed.key.id)
+        assertEquals(clock.now().plus(Duration.ofDays(7)), signed.key.useUntil)
+        val signature = Base64.getDecoder().decode(signed.signature)
+        assertTrue(EcdsaP256.verify(serverKeys.publicKey(), encryptionKeyInput(signed.key), signature))
+    }
+
+    @Test
+    fun `bodies that are not sealed are refused on every device route and nothing is stored`() = api {
+        enroll()
+
+        val registration = signedPost(ApiV1.REGISTER, registerBody(DEVICE_B), device = DEVICE_B, sealed = false)
+        val batch = signedPost(ApiV1.locationsPath(DEVICE_A.value), batchBody(aLocation(1).toDto()), sealed = false)
+
+        for (response in listOf(registration, batch)) {
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            assertEquals("ENCRYPTION_REQUIRED", response.problem().code)
+        }
+        assertNull(store.get(DEVICE_B))
+        assertTrue(store.storedLocations.isEmpty())
+    }
+
+    @Test
+    fun `after a rotation, a body sealed for the deleted key is answered so the tracker fetches the new one`() = api {
+        enroll()
+        val old = encryptionKeys.current().key
+        encryptionKeys.rotate()
+        val path = ApiV1.locationsPath(DEVICE_A.value)
+
+        val stale = signedPost(path, batchBody(aLocation(1).toDto()), sealFor = old)
+        assertEquals(HttpStatusCode.Conflict, stale.status)
+        assertEquals("ENCRYPTION_KEY_UNKNOWN", stale.problem().code)
+
+        assertEquals(HttpStatusCode.OK, signedPost(path, batchBody(aLocation(1).toDto())).status)
+        assertEquals(listOf(locationId(1)), store.storedLocations.map { it.location.id })
+    }
+
+    @Test
+    fun `a sealed body altered on the way does not open, even under a valid signature`() = api {
+        enroll()
+        val path = ApiV1.locationsPath(DEVICE_A.value)
+        val sealed = assertNotNull(SealedBodies.seal(encryptionKeys.current().key, "POST", path, batchBody(aLocation(1).toDto()).encodeToByteArray()))
+        val envelope = ProtocolJson.decodeFromString(SealedRequestDto.serializer(), sealed.body.decodeToString())
+        val altered = ProtocolJson.encodeToString(SealedRequestDto.serializer(), envelope.copy(ciphertext = envelope.ciphertext.reversed()))
+
+        val response = signedPost(path, altered, sealed = false)
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals("DECRYPTION_FAILED", response.problem().code)
+        assertTrue(store.storedLocations.isEmpty())
+    }
+
+    @Test
+    fun `answers travel sealed too, readable only by the tracker that asked`() = api {
+        val registered = register()
+        enroll(DEVICE_B)
+        val batch = signedPost(ApiV1.locationsPath(DEVICE_B.value), batchBody(aLocation(1).toDto()), device = DEVICE_B)
+
+        for (response in listOf(registered, batch)) {
+            val wire = response.bodyAsText()
+            assertTrue(wire.startsWith("""{"nonce":"""), wire)
+            assertFalse(DEVICE_A.value in wire || locationId(1).value in wire || "PENDING" in wire, wire)
+        }
+        assertEquals(listOf(locationId(1).value), batch.decode(LocationBatchResponse.serializer()).accepted)
     }
 
     @Test
@@ -238,7 +343,7 @@ class PrivateTrackerApiTest {
             refused("SIGNATURE_MISSING", signedPost(path, body, unsigned = true))
             refused("SIGNATURE_MALFORMED", signedPost(path, body, authorization = "Bearer token"))
             refused("SIGNATURE_INVALID", signedPost(path, body, keyOf = DEVICE_B))
-            refused("SIGNATURE_INVALID", signedPost(path, body, signedBody = "$body "))
+            refused("SIGNATURE_INVALID", signedPost(path, body, signedBody = "$body ".encodeToByteArray()))
             refused("SIGNATURE_EXPIRED", signedPost(path, body, signedAt = clock.now().minus(Duration.ofMinutes(6))))
             refused("SIGNATURE_EXPIRED", signedPost(path, body, signedAt = clock.now().plus(Duration.ofMinutes(6))))
             signedPost(path, body, nonce = "once-$index").also { assertTrue(it.status.value < 300, "$path: ${it.status}") }
@@ -276,14 +381,9 @@ class PrivateTrackerApiTest {
     @Test
     fun `an id written in capitals names the same device, under its own signature`() = api {
         enroll(DEVICE_A)
-        val upper = DeviceId.of(DEVICE_A.value.uppercase())
         val path = ApiV1.locationsPath(DEVICE_A.value)
-        val body = batchBody(aLocation(1).toDto())
-        val signedAt = clock.now()
-        val input = RequestSignature.signingInput("POST", path, DEVICE_A.value.uppercase(), signedAt.epochSecond, "caps", body.encodeToByteArray())
-        val header = RequestSignature.header(DEVICE_A.value.uppercase(), signedAt.epochSecond, "caps", keys.sign(upper, input))
 
-        assertEquals(HttpStatusCode.OK, signedPost(path, body, authorization = header).status)
+        assertEquals(HttpStatusCode.OK, signedPost(path, batchBody(aLocation(1).toDto()), headerDevice = DEVICE_A.value.uppercase()).status)
         assertEquals(listOf(DEVICE_A), store.storedLocations.map { it.location.deviceId })
     }
 
@@ -330,7 +430,10 @@ class PrivateTrackerApiTest {
 
         val brokenJson = signedPost(ApiV1.REGISTER, """{"device_id": """)
         assertEquals(HttpStatusCode.BadRequest, brokenJson.status)
-        assertEquals("MALFORMED_JSON", brokenJson.problem().code)
+        val broken = brokenJson.problem()
+        assertEquals("MALFORMED_JSON", broken.code)
+        // The parser's message would quote what was sealed; problems travel in the clear.
+        assertEquals("The sealed body is not a valid request", broken.detail)
 
         val badId = signedPost(ApiV1.REGISTER, registerBody().replace(DEVICE_A.value, "zzzz"))
         assertEquals(HttpStatusCode.UnprocessableEntity, badId.status)

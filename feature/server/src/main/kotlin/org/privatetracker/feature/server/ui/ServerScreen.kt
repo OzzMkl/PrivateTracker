@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -18,8 +19,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
@@ -38,8 +42,10 @@ import org.privatetracker.core.designsystem.component.ScreenScaffold
 import org.privatetracker.core.designsystem.component.SectionCard
 import org.privatetracker.core.designsystem.component.StatusBadge
 import org.privatetracker.core.designsystem.component.StatusTone
+import org.privatetracker.core.designsystem.text.dateTime
 import org.privatetracker.core.designsystem.text.message
 import org.privatetracker.core.domain.model.AddressKind
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.ServerAddress
 import org.privatetracker.core.domain.model.ServerRunState
 import org.privatetracker.core.domain.model.ServerStatus
@@ -57,6 +63,7 @@ fun ServerRoute(
         state,
         onStart = viewModel::onStart,
         onStop = viewModel::onStop,
+        onRotateEncryptionKey = viewModel::onRotateEncryptionKey,
         onOpenPermissions = onOpenPermissions,
         onOpenDevices = onOpenDevices,
         onOpenPairing = onOpenPairing,
@@ -68,6 +75,7 @@ fun ServerScreen(
     state: ServerUiState,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onRotateEncryptionKey: (onDone: () -> Unit) -> Unit,
     onOpenPermissions: () -> Unit,
     onOpenDevices: () -> Unit,
     onOpenPairing: () -> Unit,
@@ -106,6 +114,7 @@ fun ServerScreen(
             }
             (status.state as? ServerRunState.Failed)?.let { Notice(it.error.message(), tone = StatusTone.NEGATIVE) }
             if (status.state is ServerRunState.Running) AddressesCard(status.addresses, snackbar)
+            EncryptionCard(state.encryptionKey, state.rotateError, onRotateEncryptionKey, snackbar)
             Notice(stringResource(R.string.server_security_notice), tone = StatusTone.NEUTRAL)
             Notice(stringResource(R.string.server_power_hint), tone = StatusTone.NEUTRAL)
         }
@@ -188,6 +197,45 @@ private fun AddressesCard(addresses: List<ServerAddress>, snackbar: SnackbarHost
                 ) { Text(stringResource(R.string.server_copy)) }
             }
         }
+    }
+}
+
+@Composable
+private fun EncryptionCard(
+    key: EncryptionKey?,
+    rotateError: DomainError?,
+    onRotate: (onDone: () -> Unit) -> Unit,
+    snackbar: SnackbarHostState,
+) {
+    var confirming by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val rotated = stringResource(R.string.server_encryption_rotated)
+    SectionCard(title = stringResource(R.string.server_encryption)) {
+        Text(
+            stringResource(R.string.server_encryption_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        InfoRow(stringResource(R.string.server_encryption_key), key?.id ?: "…")
+        InfoRow(stringResource(R.string.server_encryption_until), key?.let { dateTime(it.useUntil) } ?: "…")
+        rotateError?.let { Notice(it.message(), tone = StatusTone.NEGATIVE) }
+        OutlinedButton(onClick = { confirming = true }, enabled = key != null, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.server_encryption_rotate))
+        }
+    }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text(stringResource(R.string.server_encryption_rotate_title)) },
+            text = { Text(stringResource(R.string.server_encryption_rotate_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    onRotate { scope.launch { snackbar.showSnackbar(rotated) } }
+                }) { Text(stringResource(R.string.server_encryption_rotate_confirm)) }
+            },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text(stringResource(R.string.server_cancel)) } },
+        )
     }
 }
 

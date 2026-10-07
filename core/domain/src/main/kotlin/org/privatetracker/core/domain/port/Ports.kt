@@ -7,6 +7,7 @@ import org.privatetracker.core.domain.model.AppPermission
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.DiscoveredServer
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationFix
@@ -17,6 +18,7 @@ import org.privatetracker.core.domain.model.ServerActivity
 import org.privatetracker.core.domain.model.ServerInfo
 import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.TrackerActivity
+import java.security.PrivateKey
 import java.time.Duration
 import java.time.Instant
 
@@ -37,7 +39,18 @@ interface ServerGateway {
      * With a [challenge], the server also signs it; see [org.privatetracker.core.domain.model.ServerIdentity].
      */
     suspend fun health(serverUrl: String, pin: ServerPin, challenge: String? = null): Outcome<ServerInfo>
-    suspend fun register(serverUrl: String, pin: ServerPin, registration: DeviceRegistration): Outcome<RegistrationResult>
+
+    /**
+     * Device routes seal their body for [encryptionKey], one the server's identity key vouched for, and
+     * read the sealed answer; from 0.5 nothing else travels. A key the server has already dropped comes
+     * back as [EncryptionKeyUnknown][org.privatetracker.core.common.result.DomainError.EncryptionKeyUnknown].
+     */
+    suspend fun register(
+        serverUrl: String,
+        pin: ServerPin,
+        registration: DeviceRegistration,
+        encryptionKey: EncryptionKey,
+    ): Outcome<RegistrationResult>
 
     /** With a whole key as [pin], the answer also only counts if the server signed it with that key. */
     suspend fun uploadLocations(
@@ -45,6 +58,7 @@ interface ServerGateway {
         pin: ServerPin,
         deviceId: DeviceId,
         locations: List<Location>,
+        encryptionKey: EncryptionKey,
     ): Outcome<LocationBatchResult>
 }
 
@@ -72,6 +86,25 @@ interface ServerKeys {
     suspend fun publicKey(): String
     suspend fun sign(data: ByteArray): ByteArray
 }
+
+/**
+ * Makes and opens the server's encryption keys (ECDH P-256, see
+ * [EncryptionKey][org.privatetracker.core.domain.model.EncryptionKey]). The private half leaves it only
+ * protected: on Android, encrypted with a Keystore key of its own that never leaves the phone. Every
+ * method throws [DeviceKeyException] when the key store fails.
+ */
+interface EncryptionKeyVault {
+    suspend fun generate(): GeneratedEncryptionKey
+
+    /** The private key that [protectedPrivateKey] holds, ready for key agreement. */
+    suspend fun privateKey(protectedPrivateKey: String): PrivateKey
+
+    /** Destroys what protects [protectedPrivateKey], so neither it nor any older copy of it opens again. */
+    suspend fun destroy(protectedPrivateKey: String)
+}
+
+/** A new key pair: the public key as Base64 X.509, the private key as only its vault can read it. */
+class GeneratedEncryptionKey(val publicKey: String, val protectedPrivateKey: String)
 
 /** Server-side checks of the keys and signatures trackers send. */
 interface SignatureVerifier {
@@ -102,6 +135,15 @@ data class LocationRequestSpec(
 /** Stream of fixes from the platform location service while collected. */
 interface LocationSource {
     fun locations(request: LocationRequestSpec): Flow<LocationFix>
+}
+
+/**
+ * The phone's significant-motion sensor, from 0.6 on: low power, it wakes the tracker when the phone
+ * starts moving, so fixes return to the normal rate without waiting for the next slow fix.
+ */
+fun interface MotionSensor {
+    /** One element each time the phone starts moving, while collected; ends at once when the phone has no such sensor. */
+    fun motions(): Flow<Unit>
 }
 
 fun interface BatteryLevelProvider {

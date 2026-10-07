@@ -20,6 +20,8 @@ data class TrackerConfigData(
     val serverKey: String = "",
     val serverAddresses: List<String> = emptyList(),
     val serverFingerprint: String = "",
+    val adaptiveInterval: Boolean = true,
+    val stillIntervalSeconds: Int = 300,
 )
 
 @Serializable
@@ -47,6 +49,33 @@ data class AppModeData(val mode: String? = null)
 data class TrackerStateData(
     val registration: RegistrationData? = null,
     val lastRecorded: RecordedLocationData? = null,
+    /** From 0.5: the server's encryption key, and the server key that vouched for it. */
+    val encryptionKey: TrustedEncryptionKeyData? = null,
+)
+
+@Serializable
+data class TrustedEncryptionKeyData(
+    val id: String,
+    val publicKey: String,
+    val useUntilMillis: Long,
+    val serverKey: String,
+)
+
+/**
+ * The server's encryption keys, from 0.5 on, oldest first. Each private key is encrypted with a
+ * Keystore key that never leaves the phone, so this file is useless anywhere else and stays out of
+ * backups and transfers.
+ */
+@Serializable
+data class ServerEncryptionKeysData(val keys: List<StoredEncryptionKeyData> = emptyList())
+
+@Serializable
+data class StoredEncryptionKeyData(
+    val id: String,
+    val publicKey: String,
+    val useUntilMillis: Long,
+    val createdAtMillis: Long,
+    val protectedPrivateKey: String,
 )
 
 @Serializable

@@ -86,6 +86,19 @@ sealed interface DomainError {
         override val code: String = "SERVER_NOT_TRUSTED"
     }
 
+    /**
+     * The server no longer holds the encryption key the request was sealed for: it rotated its keys.
+     * The tracker fetches the current one and sends again.
+     */
+    data object EncryptionKeyUnknown : DomainError {
+        override val code: String = "ENCRYPTION_KEY_UNKNOWN"
+    }
+
+    /** The server offers no end-to-end encryption, as before 0.5, so the tracker sends it nothing. */
+    data object EncryptionUnavailable : DomainError {
+        override val code: String = "ENCRYPTION_UNAVAILABLE"
+    }
+
     /** The server could not attribute the request to the device it claims to come from. */
     data class AuthenticationFailed(val reason: AuthFailure) : DomainError {
         override val code: String get() = reason.code

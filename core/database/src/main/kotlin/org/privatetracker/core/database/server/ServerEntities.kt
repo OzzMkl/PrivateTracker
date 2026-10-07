@@ -108,6 +108,13 @@ data class DeviceWithLastLocationRow(
     @Embedded(prefix = "loc_") val lastLocation: LocationEntity?,
 )
 
+/** Only what drawing a route needs: the history query reads three columns of each row, not fifteen. */
+data class TrackPointRow(
+    @ColumnInfo(name = "latitude") val latitude: Double,
+    @ColumnInfo(name = "longitude") val longitude: Double,
+    @ColumnInfo(name = "recorded_at") val recordedAt: Long,
+)
+
 /** A session with the public id of its device. */
 data class SessionRow(
     @Embedded val session: DeviceSessionEntity,

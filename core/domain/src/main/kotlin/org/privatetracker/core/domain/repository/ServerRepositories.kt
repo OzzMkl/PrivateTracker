@@ -10,6 +10,9 @@ import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.PairingTicket
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.SessionId
+import org.privatetracker.core.domain.model.StoredEncryptionKey
+import org.privatetracker.core.domain.model.TimeRange
+import org.privatetracker.core.domain.model.TrackPoint
 import java.time.Instant
 
 // Server-side storage. Implementations throw only on unexpected storage failures.
@@ -33,6 +36,12 @@ interface LocationRepository {
 
     /** Deletes locations received before [cutoff], except the last known location of each device. */
     suspend fun deleteReceivedBefore(cutoff: Instant): Int
+
+    /** Where [deviceId] was during [range], by recording time, oldest first: only what drawing needs. */
+    suspend fun findTrackPoints(deviceId: DeviceId, range: TimeRange): List<TrackPoint>
+
+    /** Every field of the locations [deviceId] recorded during [range], oldest first, for export. */
+    suspend fun findRecorded(deviceId: DeviceId, range: TimeRange): List<Location>
 }
 
 interface SessionRepository {
@@ -50,6 +59,15 @@ interface ServerConfigRepository {
     fun observe(): Flow<ServerConfig>
     suspend fun get(): ServerConfig
     suspend fun update(transform: (ServerConfig) -> ServerConfig): ServerConfig
+}
+
+/** The server's encryption keys, newest last. They outlive restarts: trackers may hold any key still kept. */
+interface EncryptionKeyRepository {
+    fun observe(): Flow<List<StoredEncryptionKey>>
+    suspend fun get(): List<StoredEncryptionKey>
+
+    /** Replaces the keys with [transform]'s result, atomically. */
+    suspend fun update(transform: (List<StoredEncryptionKey>) -> List<StoredEncryptionKey>): List<StoredEncryptionKey>
 }
 
 /**

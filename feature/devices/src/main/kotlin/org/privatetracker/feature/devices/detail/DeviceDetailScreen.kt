@@ -68,7 +68,7 @@ import java.time.Instant
 import org.privatetracker.core.designsystem.R as DesignR
 
 @Composable
-fun DeviceDetailRoute(deviceId: String, onBack: () -> Unit) {
+fun DeviceDetailRoute(deviceId: String, onBack: () -> Unit, onOpenHistory: () -> Unit) {
     val viewModel = hiltViewModel<DeviceDetailViewModel, DeviceDetailViewModel.Factory>(
         key = deviceId,
         creationCallback = { factory -> factory.create(deviceId) },
@@ -81,6 +81,7 @@ fun DeviceDetailRoute(deviceId: String, onBack: () -> Unit) {
         onClearRenameError = viewModel::onClearRenameError,
         onRemove = viewModel::onRemove,
         onDecide = viewModel::onDecide,
+        onOpenHistory = onOpenHistory,
     )
 }
 
@@ -92,6 +93,7 @@ fun DeviceDetailScreen(
     onClearRenameError: () -> Unit,
     onRemove: () -> Unit,
     onDecide: (DeviceApproval) -> Unit,
+    onOpenHistory: () -> Unit,
 ) {
     val detail = state.detail
     // A removed device leaves the screen, whoever removed it.
@@ -130,6 +132,7 @@ fun DeviceDetailScreen(
         }
         DetailContent(
             detail = detail,
+            onOpenHistory = onOpenHistory,
             onDecide = { approval ->
                 // Cutting off a device that works deserves a second look; letting one in has its own check, the fingerprint.
                 if (approval == DeviceApproval.REJECTED && detail.overview.device.approval == DeviceApproval.APPROVED) {
@@ -183,7 +186,7 @@ fun DeviceDetailScreen(
 }
 
 @Composable
-private fun DetailContent(detail: DeviceDetail, onDecide: (DeviceApproval) -> Unit, modifier: Modifier) {
+private fun DetailContent(detail: DeviceDetail, onOpenHistory: () -> Unit, onDecide: (DeviceApproval) -> Unit, modifier: Modifier) {
     val now = rememberNow()
     val overview = detail.overview
     val device = overview.device
@@ -203,6 +206,7 @@ private fun DetailContent(detail: DeviceDetail, onDecide: (DeviceApproval) -> Un
                     .height(240.dp)
                     .clip(RoundedCornerShape(12.dp)),
             )
+            OutlinedButton(onClick = onOpenHistory, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.device_history_open)) }
         }
         AccessCard(device, onDecide)
         SectionCard(title = stringResource(R.string.device_status)) {

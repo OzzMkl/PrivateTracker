@@ -46,6 +46,16 @@
     <string name="server_kind_loopback">Este teléfono</string>
     <string name="server_copy">Copiar</string>
     <string name="server_copied">URL copiada</string>
+    <string name="server_encryption">Cifrado de extremo a extremo</string>
+    <string name="server_encryption_hint">Cada teléfono cifra sus ubicaciones para esta clave antes de enviarlas: solo este servidor puede leerlas, aunque pasen por otro equipo. La clave cambia cada semana.</string>
+    <string name="server_encryption_key">Clave de cifrado</string>
+    <string name="server_encryption_until">En uso hasta</string>
+    <string name="server_encryption_rotate">Rotar clave ahora</string>
+    <string name="server_encryption_rotate_title">¿Rotar la clave de cifrado?</string>
+    <string name="server_encryption_rotate_body">Se crea una clave nueva y la actual se borra de inmediato: lo que se haya cifrado con ella ya no podrá abrirse. Los teléfonos emparejados toman la nueva solos, sin perder ubicaciones.</string>
+    <string name="server_encryption_rotate_confirm">Rotar</string>
+    <string name="server_encryption_rotated">Clave de cifrado rotada</string>
+    <string name="server_cancel">Cancelar</string>
     <string name="server_security_notice">Las ubicaciones viajan cifradas y cada teléfono comprueba que el servidor tenga esta huella. Solo entran los teléfonos que emparejas o apruebas.</string>
     <string name="server_power_hint">Para que el servidor no se detenga, mantén este teléfono conectado a la corriente.</string>
 

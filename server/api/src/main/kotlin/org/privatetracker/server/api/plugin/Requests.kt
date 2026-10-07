@@ -56,14 +56,24 @@ internal suspend fun ApplicationCall.receiveJsonBytes(maxBytes: Int = ApiV1.MAX_
     return bytes
 }
 
-internal fun <T> decodeJson(deserializer: DeserializationStrategy<T>, bytes: ByteArray): T =
+/**
+ * [sealed] bytes came out of an encrypted body: the parser's message may quote them, and problems
+ * travel in the clear, so it is left out.
+ */
+internal fun <T> decodeJson(deserializer: DeserializationStrategy<T>, bytes: ByteArray, sealed: Boolean = false): T =
     try {
         ProtocolJson.decodeFromString(deserializer, bytes.decodeToString())
     } catch (e: SerializationException) {
-        throw ApiException(HttpStatusCode.BadRequest, ErrorCode.MALFORMED_JSON, e.message?.lineSequence()?.firstOrNull())
+        throw malformed(e, sealed)
     } catch (e: IllegalArgumentException) {
-        throw ApiException(HttpStatusCode.BadRequest, ErrorCode.MALFORMED_JSON, e.message?.lineSequence()?.firstOrNull())
+        throw malformed(e, sealed)
     }
+
+private fun malformed(e: Exception, sealed: Boolean) = ApiException(
+    HttpStatusCode.BadRequest,
+    ErrorCode.MALFORMED_JSON,
+    if (sealed) "The sealed body is not a valid request" else e.message?.lineSequence()?.firstOrNull(),
+)
 
 private fun bodyTooLarge(maxBytes: Int) =
     ApiException(HttpStatusCode.PayloadTooLarge, ErrorCode.BATCH_TOO_LARGE, "Body larger than $maxBytes bytes")

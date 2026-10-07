@@ -16,9 +16,11 @@ import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.service.SessionTracker
+import org.privatetracker.core.domain.testing.InMemoryEncryptionKeyRepository
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.InMemoryServerStore
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
+import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
@@ -27,6 +29,7 @@ import org.privatetracker.core.domain.usecase.server.VerifyRequestSignature
 import org.privatetracker.core.domain.validation.LocationValidator
 import org.privatetracker.core.network.KtorServerGateway
 import org.privatetracker.core.protocol.crypto.EcdsaP256
+import org.privatetracker.core.protocol.crypto.InMemoryEncryptionKeyVault
 import org.privatetracker.core.protocol.crypto.InMemoryServerKeys
 import org.privatetracker.server.api.ServerDependencies
 import org.privatetracker.server.api.auth.InMemoryNonceRegistry
@@ -36,6 +39,7 @@ import java.io.OutputStream
 import java.io.PrintStream
 import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -67,6 +71,7 @@ class SimulationTest {
             clock = clock,
             serverConfig = config,
             serverKeys = serverKeys,
+            encryptionKeys = EncryptionKeyRing(InMemoryEncryptionKeyRepository(), InMemoryEncryptionKeyVault(), serverKeys, clock),
             registerOrUpdateDevice = RegisterOrUpdateDevice(
                 store, config, sessions, EcdsaP256, verifySignature, InMemoryPairingTicketStore(), serialTransactions, clock,
             ),
@@ -153,6 +158,33 @@ class SimulationTest {
         assertEquals(10, report.devices)
         assertEquals(result.generated.toInt(), report.delivered)
         assertEquals(result.generated.toInt(), store.storedLocations.size)
+    }
+
+    @Test
+    fun `a whole history goes up in full batches, oldest first, and verifies against the server`() = testApplication {
+        application { privateTrackerApi(serverDependencies()) }
+        val options = options().copy(trackers = 2, interval = Duration.ofMinutes(10), batchSize = 100, history = Duration.ofDays(3))
+        val simulation = Simulation(
+            options = options,
+            gatewayFactory = { keys ->
+                val client = createClient { expectSuccess = false }
+                KtorServerGateway({ client }, keys)
+            },
+            out = PrintStream(OutputStream.nullOutputStream()),
+        )
+
+        val result = coroutineScope {
+            val approvals = approveNewDevices()
+            simulation.run().also { approvals.cancel() }
+        }
+
+        // Three days at one position every ten minutes, per tracker.
+        assertEquals(2L * 3 * 24 * 6, result.generated)
+        assertTrue(result.trackerSideClean, result.toString())
+        val stored = store.storedLocations.map { it.location }
+        assertTrue(stored.minOf { it.recordedAt } < Instant.now().minus(Duration.ofDays(2)), "the history must reach back days")
+        val report = Verifier.verify(Ledger.read(options.outDir.resolve(Ledger.FILE_NAME)), store.snapshot())
+        assertTrue(report.passed, Verifier.format(report))
     }
 
     @Test

@@ -9,11 +9,14 @@ import org.privatetracker.core.domain.model.PairingTicket
 import org.privatetracker.core.domain.model.SignedRequest
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.DeviceKeys
+import org.privatetracker.core.domain.port.EncryptionKeyVault
+import org.privatetracker.core.domain.port.GeneratedEncryptionKey
 import org.privatetracker.core.domain.port.NonceRegistry
 import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.port.SignatureVerifier
 import org.privatetracker.core.domain.repository.PairingTicketStore
 import java.security.MessageDigest
+import java.security.PrivateKey
 import java.time.Instant
 import java.util.Base64
 
@@ -97,3 +100,47 @@ class InMemoryPairingTickets : PairingTicketStore {
 
     override fun observe(id: String): Flow<PairingTicket?> = current.map { it?.takeIf { ticket -> ticket.id == id } }
 }
+
+/**
+ * Encryption keys as plain labels: key N is "fake-encryption-N", and its private half a [PrivateKey]
+ * that only carries the label. A destroyed key no longer opens. Real HPKE is tested in core:protocol
+ * and core:network.
+ */
+class FakeEncryptionKeyVault(var failing: Boolean = false) : EncryptionKeyVault {
+    var generated = 0
+        private set
+
+    /** The protected private keys opened so far, in order. */
+    val opened = mutableListOf<String>()
+
+    /** The protected private keys destroyed so far, in order. */
+    val destroyed = mutableListOf<String>()
+
+    /** Makes only opening fail, as when the key store lost what protects the stored keys. */
+    var failingToOpen = false
+
+    override suspend fun generate(): GeneratedEncryptionKey {
+        if (failing) throw DeviceKeyException("Keystore unavailable")
+        generated++
+        return GeneratedEncryptionKey(fakeEncryptionKey(generated), "protected-$generated")
+    }
+
+    override suspend fun privateKey(protectedPrivateKey: String): PrivateKey {
+        if (failing || failingToOpen || protectedPrivateKey in destroyed) throw DeviceKeyException("Keystore unavailable")
+        opened += protectedPrivateKey
+        return LabelPrivateKey(protectedPrivateKey)
+    }
+
+    override suspend fun destroy(protectedPrivateKey: String) {
+        if (failing) throw DeviceKeyException("Keystore unavailable")
+        destroyed += protectedPrivateKey
+    }
+
+    private class LabelPrivateKey(val label: String) : PrivateKey {
+        override fun getAlgorithm(): String = "EC"
+        override fun getFormat(): String = "label"
+        override fun getEncoded(): ByteArray = label.encodeToByteArray()
+    }
+}
+
+fun fakeEncryptionKey(number: Int): String = Base64.getEncoder().encodeToString("fake-encryption-$number".encodeToByteArray())

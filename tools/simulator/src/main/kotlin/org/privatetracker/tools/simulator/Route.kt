@@ -3,7 +3,9 @@ package org.privatetracker.tools.simulator
 import org.privatetracker.core.domain.geo.distanceMeters
 import org.privatetracker.core.domain.model.LocationFix
 import org.privatetracker.core.domain.port.BatteryLevelProvider
+import java.time.DayOfWeek
 import java.time.Instant
+import java.time.ZoneId
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -78,6 +80,69 @@ class RandomRoute(
         }
 
         private fun normalize(degrees: Double): Double = ((degrees % 360.0) + 360.0) % 360.0
+    }
+}
+
+/**
+ * A month in the life of one phone, for the history: home at night, a drive to work and back on
+ * weekdays, a walk at lunch, and an outing on weekends. Indoors the fixes wander a few meters, as
+ * real ones do. The same seed gives the same month.
+ */
+class DailyRoutine(center: GeoPoint, private val random: Random, private val zone: ZoneId = ZoneId.systemDefault()) {
+    private val home = RandomRoute.move(center, random.nextDouble(500.0, 2_000.0), random.nextDouble(0.0, 360.0))
+    private val work = RandomRoute.move(home, random.nextDouble(4_000.0, 8_000.0), random.nextDouble(0.0, 360.0))
+
+    fun at(time: Instant): LocationFix {
+        val local = time.atZone(zone)
+        val minute = local.hour * 60 + local.minute + local.second / 60.0
+        val weekend = local.dayOfWeek == DayOfWeek.SATURDAY || local.dayOfWeek == DayOfWeek.SUNDAY
+        val (place, speed) = if (weekend) weekendAt(minute) else weekdayAt(minute)
+        val still = speed == 0.0
+        val noisy = if (still) RandomRoute.move(place, random.nextDouble(0.0, 8.0), random.nextDouble(0.0, 360.0)) else place
+        return LocationFix(
+            latitude = noisy.latitude,
+            longitude = noisy.longitude,
+            accuracyM = (if (still) random.nextDouble(8.0, 30.0) else random.nextDouble(3.0, 12.0)).toFloat(),
+            speedMps = speed.toFloat(),
+            provider = RandomRoute.PROVIDER,
+            isMock = true,
+            recordedAt = time,
+        )
+    }
+
+    private fun weekdayAt(minute: Double): Pair<GeoPoint, Double> = when {
+        minute < 450 -> home to 0.0
+        minute < 490 -> drive(home, work, (minute - 450) / 40)
+        minute < 780 -> work to 0.0
+        minute < 820 -> loop(work, radiusM = 300.0, fraction = (minute - 780) / 40) to WALK_MPS
+        minute < 1050 -> work to 0.0
+        minute < 1090 -> drive(work, home, (minute - 1050) / 40)
+        else -> home to 0.0
+    }
+
+    private fun weekendAt(minute: Double): Pair<GeoPoint, Double> = when {
+        minute in 660.0..780.0 -> loop(home, radiusM = 2_000.0, fraction = (minute - 660) / 120) to DRIVE_MPS / 2
+        else -> home to 0.0
+    }
+
+    /** Along a gently curving road, not a straight line, so simplifying it has turns to keep. */
+    private fun drive(from: GeoPoint, to: GeoPoint, fraction: Double): Pair<GeoPoint, Double> {
+        val distance = distanceMeters(from.latitude, from.longitude, to.latitude, to.longitude)
+        val bearing = RandomRoute.bearingTo(from, to)
+        val along = RandomRoute.move(from, distance * fraction, bearing)
+        val sideways = sin(fraction * Math.PI * 3) * 400.0
+        return RandomRoute.move(along, sideways, bearing + 90.0) to distance / (40 * 60)
+    }
+
+    private fun loop(around: GeoPoint, radiusM: Double, fraction: Double): GeoPoint {
+        val angle = fraction * 360.0
+        val center = RandomRoute.move(around, radiusM, 0.0)
+        return RandomRoute.move(center, radiusM, angle + 180.0)
+    }
+
+    private companion object {
+        const val WALK_MPS = 1.3
+        const val DRIVE_MPS = 8.0
     }
 }
 

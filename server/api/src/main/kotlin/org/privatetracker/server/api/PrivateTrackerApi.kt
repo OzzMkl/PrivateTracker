@@ -13,6 +13,7 @@ import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.repository.ServerConfigRepository
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
+import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
@@ -35,6 +36,8 @@ class ServerDependencies(
     val serverConfig: ServerConfigRepository,
     /** Signs health challenges, so paired trackers can tell this server from any other. */
     val serverKeys: ServerKeys,
+    /** The keys trackers seal their requests for, from 0.5 on; health hands out the current one. */
+    val encryptionKeys: EncryptionKeyRing,
     val registerOrUpdateDevice: RegisterOrUpdateDevice,
     val authenticateDevice: AuthenticateDevice,
     val ingestLocationBatch: IngestLocationBatch,

@@ -27,6 +27,7 @@ import org.privatetracker.R
 import org.privatetracker.core.domain.model.AppMode
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.feature.devices.detail.DeviceDetailRoute
+import org.privatetracker.feature.devices.history.DeviceHistoryRoute
 import org.privatetracker.feature.devices.list.DeviceListRoute
 import org.privatetracker.feature.devices.map.DevicesMapRoute
 import org.privatetracker.feature.onboarding.PermissionsRoute
@@ -124,7 +125,10 @@ fun MainScaffold(mode: AppMode, pairingLink: String?, onPairingLinkHandled: () -
                         onOpenPermissions = openPermissions,
                     )
                 }
-                entry<DeviceDetailKey> { key -> DeviceDetailRoute(deviceId = key.deviceId, onBack = pop) }
+                entry<DeviceDetailKey> { key ->
+                    DeviceDetailRoute(deviceId = key.deviceId, onBack = pop, onOpenHistory = { backStack.add(DeviceHistoryKey(key.deviceId)) })
+                }
+                entry<DeviceHistoryKey> { key -> DeviceHistoryRoute(deviceId = key.deviceId, onBack = pop) }
                 entry<PermissionsKey> {
                     PermissionsRoute(mode = mode, doneLabel = stringResource(R.string.permissions_done), onDone = pop, onBack = pop)
                 }

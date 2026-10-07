@@ -6,10 +6,12 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import org.privatetracker.core.domain.port.DeviceKeys
+import org.privatetracker.core.domain.port.EncryptionKeyVault
 import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.port.SignatureVerifier
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.security.KeystoreDeviceKeys
+import org.privatetracker.core.security.KeystoreEncryptionKeyVault
 import org.privatetracker.core.security.KeystoreServerKeys
 
 @Module
@@ -18,6 +20,8 @@ abstract class SecurityBindings {
     @Binds abstract fun deviceKeys(keys: KeystoreDeviceKeys): DeviceKeys
 
     @Binds abstract fun serverKeys(keys: KeystoreServerKeys): ServerKeys
+
+    @Binds abstract fun encryptionKeyVault(vault: KeystoreEncryptionKeyVault): EncryptionKeyVault
 }
 
 @Module

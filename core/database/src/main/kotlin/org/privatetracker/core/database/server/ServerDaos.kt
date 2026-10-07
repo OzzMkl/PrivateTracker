@@ -95,6 +95,27 @@ interface LocationDao {
 
     @Query("SELECT COUNT(*) FROM locations l JOIN devices d ON d.id = l.device_id WHERE d.device_uid = :deviceUid")
     suspend fun countForDevice(deviceUid: String): Int
+
+    /** A range scan of the (device_id, recorded_at) index, already in order. */
+    @Query(
+        """
+        SELECT l.latitude, l.longitude, l.recorded_at FROM locations l
+        WHERE l.device_id = (SELECT id FROM devices WHERE device_uid = :deviceUid)
+          AND l.recorded_at >= :from AND l.recorded_at < :to
+        ORDER BY l.recorded_at
+        """,
+    )
+    suspend fun findTrackPoints(deviceUid: String, from: Long, to: Long): List<TrackPointRow>
+
+    @Query(
+        """
+        SELECT l.* FROM locations l
+        WHERE l.device_id = (SELECT id FROM devices WHERE device_uid = :deviceUid)
+          AND l.recorded_at >= :from AND l.recorded_at < :to
+        ORDER BY l.recorded_at
+        """,
+    )
+    suspend fun findRecorded(deviceUid: String, from: Long, to: Long): List<LocationEntity>
 }
 
 @Dao

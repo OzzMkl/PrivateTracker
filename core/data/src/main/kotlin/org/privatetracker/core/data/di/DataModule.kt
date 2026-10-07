@@ -10,6 +10,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import org.privatetracker.core.data.repository.DataStoreAppModeRepository
+import org.privatetracker.core.data.repository.DataStoreEncryptionKeyRepository
 import org.privatetracker.core.data.repository.DataStoreIdentityRepository
 import org.privatetracker.core.data.repository.DataStoreServerConfigRepository
 import org.privatetracker.core.data.repository.DataStoreTrackerConfigRepository
@@ -28,6 +29,7 @@ import org.privatetracker.core.database.tracker.OutboxDao
 import org.privatetracker.core.datastore.AppModeData
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.ServerConfigData
+import org.privatetracker.core.datastore.ServerEncryptionKeysData
 import org.privatetracker.core.datastore.HttpsAddressesMigration
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
@@ -35,6 +37,7 @@ import org.privatetracker.core.datastore.createJsonDataStore
 import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.repository.AppModeRepository
 import org.privatetracker.core.domain.repository.DeviceRepository
+import org.privatetracker.core.domain.repository.EncryptionKeyRepository
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.LocationRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
@@ -84,6 +87,11 @@ object StorageModule {
     @Provides @Singleton
     fun trackerStateStore(@ApplicationContext context: Context): DataStore<TrackerStateData> =
         createJsonDataStore(context, "tracker_state", TrackerStateData.serializer(), TrackerStateData())
+
+    /** Excluded from backups and device transfers, like identity.json: its keys only open on this phone. */
+    @Provides @Singleton
+    fun serverEncryptionKeysStore(@ApplicationContext context: Context): DataStore<ServerEncryptionKeysData> =
+        createJsonDataStore(context, "server_encryption_keys", ServerEncryptionKeysData.serializer(), ServerEncryptionKeysData())
 }
 
 @Module
@@ -99,4 +107,5 @@ abstract class RepositoryModule {
     @Binds abstract fun identity(repository: DataStoreIdentityRepository): IdentityRepository
     @Binds abstract fun trackerState(repository: DataStoreTrackerStateRepository): TrackerStateRepository
     @Binds abstract fun appMode(repository: DataStoreAppModeRepository): AppModeRepository
+    @Binds abstract fun encryptionKeys(repository: DataStoreEncryptionKeyRepository): EncryptionKeyRepository
 }

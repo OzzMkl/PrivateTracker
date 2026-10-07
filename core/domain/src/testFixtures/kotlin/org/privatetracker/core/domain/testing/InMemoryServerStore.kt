@@ -12,7 +12,11 @@ import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.SessionId
+import org.privatetracker.core.domain.model.StoredEncryptionKey
+import org.privatetracker.core.domain.model.TimeRange
+import org.privatetracker.core.domain.model.TrackPoint
 import org.privatetracker.core.domain.repository.DeviceRepository
+import org.privatetracker.core.domain.repository.EncryptionKeyRepository
 import org.privatetracker.core.domain.repository.LocationRepository
 import org.privatetracker.core.domain.repository.ServerConfigRepository
 import org.privatetracker.core.domain.repository.SessionRepository
@@ -107,6 +111,15 @@ class InMemoryServerStore : DeviceRepository, LocationRepository, SessionReposit
         expired.size
     }
 
+    override suspend fun findTrackPoints(deviceId: DeviceId, range: TimeRange): List<TrackPoint> =
+        findRecorded(deviceId, range).map { TrackPoint(it.latitude, it.longitude, it.recordedAt) }
+
+    override suspend fun findRecorded(deviceId: DeviceId, range: TimeRange): List<Location> = locked {
+        locations.values.map { it.location }
+            .filter { it.deviceId == deviceId && !it.recordedAt.isBefore(range.from) && it.recordedAt.isBefore(range.to) }
+            .sortedBy { it.recordedAt }
+    }
+
     // SessionRepository
 
     override suspend fun findOpen(deviceId: DeviceId): DeviceSession? = locked {
@@ -141,6 +154,21 @@ class InMemoryServerConfigRepository(initial: ServerConfig = ServerConfig()) : S
     override suspend fun get(): ServerConfig = state.value
     override suspend fun update(transform: (ServerConfig) -> ServerConfig): ServerConfig {
         state.update(transform)
+        return state.value
+    }
+}
+
+class InMemoryEncryptionKeyRepository : EncryptionKeyRepository {
+    private val state = MutableStateFlow<List<StoredEncryptionKey>>(emptyList())
+
+    /** How many times the keys were written, so tests can tell a write that changed nothing. */
+    var writes = 0
+        private set
+
+    override fun observe(): Flow<List<StoredEncryptionKey>> = state
+    override suspend fun get(): List<StoredEncryptionKey> = state.value
+    override suspend fun update(transform: (List<StoredEncryptionKey>) -> List<StoredEncryptionKey>): List<StoredEncryptionKey> {
+        state.update { current -> transform(current).also { if (it != current) writes++ } }
         return state.value
     }
 }

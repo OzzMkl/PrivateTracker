@@ -223,6 +223,21 @@ private fun TrackerSection(form: TrackerForm, test: ConnectionTest, actions: Set
             error = form.errors["intervalSeconds"],
             keyboardType = KeyboardType.Number,
         )
+        SwitchRow(
+            title = stringResource(R.string.tracker_adaptive),
+            body = stringResource(R.string.tracker_adaptive_body),
+            checked = form.adaptiveInterval,
+            onCheckedChange = { value -> change { it.copy(adaptiveInterval = value) } },
+        )
+        if (form.adaptiveInterval) {
+            FormField(
+                value = form.stillIntervalSeconds,
+                onValueChange = { value -> change { it.copy(stillIntervalSeconds = value) } },
+                label = stringResource(R.string.tracker_still_interval),
+                error = form.errors["stillIntervalSeconds"],
+                keyboardType = KeyboardType.Number,
+            )
+        }
         FormField(
             value = form.minDistanceM,
             onValueChange = { value -> change { it.copy(minDistanceM = value) } },

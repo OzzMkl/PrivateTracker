@@ -7,10 +7,13 @@ import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.domain.model.DeviceApproval
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
+import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.SignedEncryptionKey
 import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.T0
 import org.privatetracker.core.domain.testing.aLocation
@@ -24,6 +27,7 @@ import org.privatetracker.core.protocol.mapper.toDomainError
 import org.privatetracker.core.protocol.mapper.toDto
 import org.privatetracker.core.protocol.v1.ErrorCode
 import org.privatetracker.core.protocol.v1.ProtocolJson
+import org.privatetracker.core.protocol.v1.dto.HealthResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchRequest
 import org.privatetracker.core.protocol.v1.dto.LocationDto
 import org.privatetracker.core.protocol.v1.dto.ProblemDetails
@@ -33,6 +37,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SerializationTest {
     @Test
@@ -153,5 +159,19 @@ class MappingTest {
             val code = ErrorCode.valueOf(reason.code)
             assertEquals(DomainError.AuthenticationFailed(reason), problem(code).toDomainError(401, null))
         }
+        assertEquals(DomainError.EncryptionKeyUnknown, problem(ErrorCode.ENCRYPTION_KEY_UNKNOWN).toDomainError(409, null))
+    }
+
+    @Test
+    fun `health carries the signed encryption key from 0_5, and answers without one still map`() {
+        val key = SignedEncryptionKey(EncryptionKey("3F9A-01BC-77D2-E410", "a2V5", T0.plusSeconds(60)), "c2ln")
+        val info = ServerInfo("Casa", "0.5.0", 1, T0, encryptionKey = key)
+
+        val json = ProtocolJson.encodeToString(HealthResponse.serializer(), info.toDto())
+
+        assertTrue(""""encryption_key":{"id":"3F9A-01BC-77D2-E410","public_key":"a2V5","use_until":"2026-10-02T18:01:00Z","signature":"c2ln"}""" in json, json)
+        assertEquals(info, ProtocolJson.decodeFromString(HealthResponse.serializer(), json).toDomain().successValue())
+        val old = """{"status":"ok","server_name":"Casa","server_version":"0.4.0","protocol_version":1,"server_time":"2026-10-02T18:00:00Z"}"""
+        assertNull(ProtocolJson.decodeFromString(HealthResponse.serializer(), old).toDomain().successValue().encryptionKey)
     }
 }

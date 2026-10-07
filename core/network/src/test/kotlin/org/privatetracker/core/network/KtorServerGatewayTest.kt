@@ -11,12 +11,15 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.ServerPin
+import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.DeviceKeys
 import org.privatetracker.core.domain.testing.DEVICE_A
@@ -29,8 +32,10 @@ import org.privatetracker.core.domain.testing.locationId
 import org.privatetracker.core.domain.testing.successValue
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.crypto.InMemoryDeviceKeys
+import org.privatetracker.core.protocol.crypto.InMemoryEncryptionKeyVault
 import org.privatetracker.core.protocol.crypto.InMemoryServerKeys
 import org.privatetracker.core.protocol.v1.RequestSignature
+import org.privatetracker.core.protocol.v1.SealedBodies
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.util.Base64
@@ -38,6 +43,7 @@ import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -54,6 +60,9 @@ private val PIN = ServerPin.Fingerprint("3F9A-01BC-77D2-E410")
 class KtorServerGatewayTest {
     private val requests = mutableListOf<HttpRequestData>()
     private val keys = InMemoryDeviceKeys()
+    private val vault = InMemoryEncryptionKeyVault()
+    private val generated = runBlocking { vault.generate() }
+    private val encryptionKey = EncryptionKey(keyFingerprint(generated.publicKey)!!, generated.publicKey, T0.plusSeconds(3600))
 
     private val pins = mutableListOf<ServerPin>()
 
@@ -67,6 +76,9 @@ class KtorServerGatewayTest {
     }
 
     private fun MockRequestHandleScope.json(status: HttpStatusCode, body: String, extra: Pair<String, String>? = null) =
+        json(status, body.encodeToByteArray(), extra)
+
+    private fun MockRequestHandleScope.json(status: HttpStatusCode, body: ByteArray, extra: Pair<String, String>? = null) =
         respond(
             content = body,
             status = status,
@@ -76,16 +88,30 @@ class KtorServerGatewayTest {
             ),
         )
 
+    /** What the server does: opens the request with the private key of [encryptionKey]. */
+    private suspend fun open(request: HttpRequestData): SealedBodies.OpenedRequest {
+        val privateKey = vault.privateKey(generated.protectedPrivateKey)
+        val result = SealedBodies.open(request.body.toByteArray(), request.method.value, request.url.encodedPath) { id ->
+            (privateKey to generated.publicKey).takeIf { id == encryptionKey.id }
+        }
+        return assertIs<SealedBodies.OpenResult.Opened>(result).request
+    }
+
+    /** The server's answer to a sealed request, sealed for the tracker that sent it. */
+    private suspend fun MockRequestHandleScope.sealed(request: HttpRequestData, status: HttpStatusCode, body: String) =
+        json(status, SealedBodies.sealResponse(open(request), body.encodeToByteArray()))
+
     @Test
-    fun `registration posts the device as JSON with our User-Agent`() = runTest {
-        val gateway = gateway {
-            json(
+    fun `registration posts the device sealed for the server's key, with our User-Agent`() = runTest {
+        val gateway = gateway { request ->
+            sealed(
+                request,
                 HttpStatusCode.Created,
                 """{"device_id":"${DEVICE_A.value}","created":true,"max_batch_size":100,"server_time":"2026-10-02T18:00:00Z"}""",
             )
         }
 
-        val result = gateway.register(SERVER, PIN, aRegistration()).successValue()
+        val result = gateway.register(SERVER, PIN, aRegistration(), encryptionKey).successValue()
 
         assertTrue(result.created)
         val request = requests.single()
@@ -93,19 +119,23 @@ class KtorServerGatewayTest {
         assertEquals("https://192.168.1.10:8787/api/v1/devices/register", request.url.toString())
         assertEquals("PrivateTracker-Tracker/0.1.0", request.headers[HttpHeaders.UserAgent])
         assertEquals(ContentType.Application.Json, request.body.contentType?.withoutParameters())
-        assertTrue(request.body.toByteArray().decodeToString().contains("\"protocol_version\":1"))
+        val wire = request.body.toByteArray().decodeToString()
+        assertTrue(wire.startsWith("""{"key_id":"${encryptionKey.id}","enc":"""), wire)
+        assertFalse("protocol_version" in wire || "Pixel" in wire, wire)
+        assertTrue(open(request).plaintext.decodeToString().contains("\"protocol_version\":1"))
     }
 
     @Test
     fun `an upload returns the per-location result`() = runTest {
-        val gateway = gateway {
-            json(
+        val gateway = gateway { request ->
+            sealed(
+                request,
                 HttpStatusCode.OK,
                 """{"accepted":["${locationId(1).value}"],"duplicates":[],"rejected":[],"server_time":"2026-10-02T18:00:00Z"}""",
             )
         }
 
-        val result = gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1))).successValue()
+        val result = gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)), encryptionKey).successValue()
 
         assertEquals(listOf(locationId(1)), result.accepted)
         assertEquals("/api/v1/devices/${DEVICE_A.value}/locations", requests.single().url.encodedPath)
@@ -119,17 +149,18 @@ class KtorServerGatewayTest {
                     HttpStatusCode.OK,
                     """{"status":"ok","server_name":"S","server_version":"0.2.0","protocol_version":1,"server_time":"2026-10-02T18:00:00Z"}""",
                 )
-                request.url.encodedPath.endsWith("/register") -> json(
+                request.url.encodedPath.endsWith("/register") -> sealed(
+                    request,
                     HttpStatusCode.Created,
                     """{"device_id":"${DEVICE_A.value}","created":true,"max_batch_size":100,"server_time":"2026-10-02T18:00:00Z","approval":"PENDING"}""",
                 )
-                else -> json(HttpStatusCode.OK, """{"accepted":[],"duplicates":[],"rejected":[],"server_time":"2026-10-02T18:00:00Z"}""")
+                else -> sealed(request, HttpStatusCode.OK, """{"accepted":[],"duplicates":[],"rejected":[],"server_time":"2026-10-02T18:00:00Z"}""")
             }
         }
 
         gateway.health(SERVER, PIN).successValue()
-        assertEquals(DeviceApproval.PENDING, gateway.register(SERVER, PIN, aRegistration()).successValue().approval)
-        gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1))).successValue()
+        assertEquals(DeviceApproval.PENDING, gateway.register(SERVER, PIN, aRegistration(), encryptionKey).successValue().approval)
+        gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)), encryptionKey).successValue()
 
         assertNull(requests[0].headers[HttpHeaders.Authorization])
         val publicKey = keys.publicKey(DEVICE_A)
@@ -142,7 +173,9 @@ class KtorServerGatewayTest {
             )
             assertTrue(EcdsaP256.verify(publicKey, input, signature.signature), request.url.encodedPath)
         }
-        assertTrue(requests[1].body.toByteArray().decodeToString().contains("\"public_key\""))
+        // The signature covers the sealed bytes; the key it registers travels inside them.
+        assertFalse(requests[1].body.toByteArray().decodeToString().contains("\"public_key\""))
+        assertTrue(open(requests[1]).plaintext.decodeToString().contains("\"public_key\""))
     }
 
     @Test
@@ -160,11 +193,13 @@ class KtorServerGatewayTest {
         var signWith: InMemoryServerKeys? = serverKeys
         val gateway = gateway { request ->
             val nonce = RequestSignature.parse(request.headers[HttpHeaders.Authorization]!!)!!.nonce
-            val ack = signWith?.sign(RequestSignature.ackInput(nonce, answer.encodeToByteArray()))
-            json(HttpStatusCode.OK, answer, ack?.let { RequestSignature.ACK_HEADER to Base64.getEncoder().encodeToString(it) })
+            val sealedAnswer = SealedBodies.sealResponse(open(request), answer.encodeToByteArray())
+            // Signed over the sealed bytes, as they travel.
+            val ack = signWith?.sign(RequestSignature.ackInput(nonce, sealedAnswer))
+            json(HttpStatusCode.OK, sealedAnswer, ack?.let { RequestSignature.ACK_HEADER to Base64.getEncoder().encodeToString(it) })
         }
         val pinned = ServerPin.Key(serverKeys.publicKey())
-        suspend fun upload(pin: ServerPin) = gateway.uploadLocations(SERVER, pin, DEVICE_A, listOf(aLocation(1)))
+        suspend fun upload(pin: ServerPin) = gateway.uploadLocations(SERVER, pin, DEVICE_A, listOf(aLocation(1)), encryptionKey)
 
         assertEquals(listOf(locationId(1)), upload(pinned).successValue().accepted)
         signWith = InMemoryServerKeys()
@@ -181,8 +216,8 @@ class KtorServerGatewayTest {
         val other = ServerPin.Fingerprint("0000-1111-2222-3333")
 
         gateway.health(SERVER, PIN)
-        gateway.register(SERVER, other, aRegistration())
-        gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)))
+        gateway.register(SERVER, other, aRegistration(), encryptionKey)
+        gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)), encryptionKey)
 
         assertEquals(listOf<ServerPin>(PIN, other, PIN), pins)
     }
@@ -213,7 +248,7 @@ class KtorServerGatewayTest {
         val client = createProtocolHttpClient(engine, "PrivateTracker-Tracker/0.1.0")
         val gateway = KtorServerGateway({ client }, broken, FakeClock())
 
-        assertEquals(DomainError.DeviceKeyUnavailable, gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError())
+        assertEquals(DomainError.DeviceKeyUnavailable, gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation()), encryptionKey).failureError())
         assertTrue(requests.isEmpty())
     }
 
@@ -222,7 +257,7 @@ class KtorServerGatewayTest {
         val notRegistered = gateway {
             json(HttpStatusCode.NotFound, """{"type":"t","title":"t","status":404,"code":"DEVICE_NOT_REGISTERED"}""")
         }
-        assertEquals(DomainError.DeviceNotRegistered, notRegistered.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError())
+        assertEquals(DomainError.DeviceNotRegistered, notRegistered.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation()), encryptionKey).failureError())
 
         val limited = gateway {
             json(
@@ -236,15 +271,44 @@ class KtorServerGatewayTest {
         val pending = gateway {
             json(HttpStatusCode.Forbidden, """{"type":"t","title":"t","status":403,"code":"DEVICE_PENDING_APPROVAL"}""")
         }
-        assertEquals(DomainError.DevicePendingApproval, pending.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError())
+        assertEquals(DomainError.DevicePendingApproval, pending.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation()), encryptionKey).failureError())
 
         val expired = gateway {
             json(HttpStatusCode.Unauthorized, """{"type":"t","title":"t","status":401,"code":"SIGNATURE_EXPIRED"}""")
         }
         assertEquals(
             DomainError.AuthenticationFailed(AuthFailure.EXPIRED),
-            expired.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError(),
+            expired.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation()), encryptionKey).failureError(),
         )
+    }
+
+    @Test
+    fun `an answer that does not open with the request's own key is no answer`() = runTest {
+        val answer = """{"accepted":["${locationId(1).value}"],"duplicates":[],"rejected":[],"server_time":"2026-10-02T18:00:00Z"}"""
+        var previous: SealedBodies.OpenedRequest? = null
+        val replaying = gateway { request ->
+            val opened = open(request)
+            // Answers each request with what it sealed for the one before.
+            json(HttpStatusCode.OK, SealedBodies.sealResponse(previous ?: opened, answer.encodeToByteArray())).also { previous = opened }
+        }
+        replaying.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)), encryptionKey).successValue()
+        assertIs<DomainError.Network.InvalidResponse>(replaying.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)), encryptionKey).failureError())
+
+        val plain = gateway { json(HttpStatusCode.OK, answer) }
+        assertIs<DomainError.Network.InvalidResponse>(plain.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)), encryptionKey).failureError())
+    }
+
+    @Test
+    fun `a rotated key and a key that is not P-256 are reported as such`() = runTest {
+        val rotated = gateway {
+            json(HttpStatusCode.Conflict, """{"type":"t","title":"t","status":409,"code":"ENCRYPTION_KEY_UNKNOWN"}""")
+        }
+        assertEquals(DomainError.EncryptionKeyUnknown, rotated.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation()), encryptionKey).failureError())
+
+        requests.clear()
+        val broken = encryptionKey.copy(publicKey = "bm90IGEga2V5")
+        assertEquals(DomainError.EncryptionUnavailable, rotated.register(SERVER, PIN, aRegistration(), broken).failureError())
+        assertTrue(requests.isEmpty())
     }
 
     @Test

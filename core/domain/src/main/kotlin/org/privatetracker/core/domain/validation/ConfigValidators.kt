@@ -17,6 +17,7 @@ const val MAX_BATCH_SIZE = 100
 
 object TrackerConfigValidator {
     val INTERVAL_SECONDS = 10..3600
+    val STILL_INTERVAL_SECONDS = 60..3600
     val MIN_DISTANCE_M = 0f..1000f
     val MAX_ACCURACY_M = 1f..5000f
     val BATCH_SIZE = 1..MAX_BATCH_SIZE
@@ -28,6 +29,7 @@ object TrackerConfigValidator {
         if (config.serverKey.isBlank()) validateServerFingerprint(config.serverFingerprint)?.let(::add)
         validateDeviceName("deviceName", config.deviceName)?.let(::add)
         if (config.intervalSeconds !in INTERVAL_SECONDS) add(FieldViolation("intervalSeconds", OUT_OF_RANGE))
+        if (config.stillIntervalSeconds !in STILL_INTERVAL_SECONDS) add(FieldViolation("stillIntervalSeconds", OUT_OF_RANGE))
         if (config.minDistanceM !in MIN_DISTANCE_M) add(FieldViolation("minDistanceM", OUT_OF_RANGE))
         if (config.maxAccuracyM !in MAX_ACCURACY_M) add(FieldViolation("maxAccuracyM", OUT_OF_RANGE))
         if (config.batchSize !in BATCH_SIZE) add(FieldViolation("batchSize", OUT_OF_RANGE))

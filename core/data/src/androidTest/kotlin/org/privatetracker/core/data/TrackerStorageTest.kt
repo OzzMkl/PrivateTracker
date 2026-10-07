@@ -9,7 +9,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.KSerializer
 import org.junit.After
@@ -19,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.privatetracker.core.data.repository.DataStoreAppModeRepository
+import org.privatetracker.core.data.repository.DataStoreEncryptionKeyRepository
 import org.privatetracker.core.data.repository.DataStoreIdentityRepository
 import org.privatetracker.core.data.repository.DataStoreTrackerConfigRepository
 import org.privatetracker.core.data.repository.DataStoreTrackerStateRepository
@@ -27,11 +30,15 @@ import org.privatetracker.core.database.TrackerDatabase
 import org.privatetracker.core.datastore.AppModeData
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.JsonSerializer
+import org.privatetracker.core.datastore.ServerEncryptionKeysData
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
 import org.privatetracker.core.domain.model.AppMode
 import org.privatetracker.core.domain.model.DeviceId
+import org.privatetracker.core.domain.model.EncryptionKey
+import org.privatetracker.core.domain.model.StoredEncryptionKey
 import org.privatetracker.core.domain.model.TrackerRegistration
+import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.DEVICE_B
 import org.privatetracker.core.domain.testing.T0
@@ -112,13 +119,16 @@ class DataStoreRepositoriesTest {
     @After
     fun tearDown() = scopes.forEach { it.cancel() }
 
+    /** Closes every store and waits until each has let go of its file, so the same file can be opened again. */
+    private suspend fun closeStores() = scopes.forEach { it.coroutineContext.job.cancelAndJoin() }
+
     @Test
     fun theDeviceIdIsCreatedOnceAndSurvivesARestart() = runTest {
         val file = tempFile()
         val first = DataStoreIdentityRepository(store(file, IdentityData.serializer(), IdentityData()))
         val id = first.getOrCreate { DEVICE_A }
         assertEquals(DEVICE_A, first.getOrCreate { DEVICE_B })
-        scopes.forEach { it.cancel() }
+        closeStores()
 
         val reopened = DataStoreIdentityRepository(store(file, IdentityData.serializer(), IdentityData()))
 
@@ -131,7 +141,7 @@ class DataStoreRepositoriesTest {
         val first = DataStoreAppModeRepository(store(file, AppModeData.serializer(), AppModeData()))
         assertNull(first.get())
         first.set(AppMode.TRACKER_AND_SERVER)
-        scopes.forEach { it.cancel() }
+        closeStores()
 
         val reopened = DataStoreAppModeRepository(store(file, AppModeData.serializer(), AppModeData()))
 
@@ -164,5 +174,35 @@ class DataStoreRepositoriesTest {
         assertEquals(aLocation(1).latitude, last.latitude, 0.0)
         repository.setRegistration(null)
         assertNull(repository.registration())
+    }
+
+    @Test
+    fun theServerEncryptionKeyAndWhoVouchedForItSurviveARestart() = runTest {
+        val file = tempFile()
+        val trusted = TrustedEncryptionKey(EncryptionKey("3F9A-01BC-77D2-E410", "a2V5", T0.plusSeconds(604_800)), "c2VydmVy")
+        DataStoreTrackerStateRepository(store(file, TrackerStateData.serializer(), TrackerStateData())).setEncryptionKey(trusted)
+        closeStores()
+
+        val reopened = DataStoreTrackerStateRepository(store(file, TrackerStateData.serializer(), TrackerStateData()))
+
+        assertEquals(trusted, reopened.encryptionKey())
+        reopened.setEncryptionKey(null)
+        assertNull(reopened.encryptionKey())
+    }
+
+    @Test
+    fun theServersEncryptionKeysKeepTheirOrderAndSurviveARestart() = runTest {
+        val file = tempFile()
+        fun stored(n: Int) = StoredEncryptionKey(EncryptionKey("KEY-$n", "a2V5LTE=", T0.plusSeconds(n * 60L)), T0, "protected-$n")
+        val first = DataStoreEncryptionKeyRepository(store(file, ServerEncryptionKeysData.serializer(), ServerEncryptionKeysData()))
+        first.update { it + stored(1) }
+        first.update { it + stored(2) }
+        closeStores()
+
+        val reopened = DataStoreEncryptionKeyRepository(store(file, ServerEncryptionKeysData.serializer(), ServerEncryptionKeysData()))
+
+        assertEquals(listOf(stored(1), stored(2)), reopened.get())
+        reopened.update { keys -> keys.filter { it.key.id == "KEY-2" } }
+        assertEquals(listOf(stored(2)), reopened.observe().first())
     }
 }

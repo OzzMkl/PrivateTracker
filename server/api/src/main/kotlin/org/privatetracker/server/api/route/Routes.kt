@@ -3,10 +3,8 @@ package org.privatetracker.server.api.route
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.log
-import io.ktor.http.ContentType
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -31,6 +29,7 @@ import org.privatetracker.core.protocol.v1.dto.DevicesResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchRequest
 import org.privatetracker.core.protocol.v1.dto.LocationBatchResponse
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceRequest
+import org.privatetracker.core.protocol.v1.dto.RegisterDeviceResponse
 import org.privatetracker.core.protocol.v1.dto.RejectedLocationDto
 import org.privatetracker.server.api.ServerDependencies
 import org.privatetracker.server.api.auth.signedRequest
@@ -38,8 +37,11 @@ import org.privatetracker.server.api.plugin.ApiException
 import org.privatetracker.server.api.plugin.decodeJson
 import org.privatetracker.server.api.plugin.describe
 import org.privatetracker.server.api.plugin.getOrThrowApi
+import org.privatetracker.server.api.plugin.openSealed
 import org.privatetracker.server.api.plugin.receiveJsonBytes
 import org.privatetracker.server.api.plugin.remoteAddressOrNull
+import org.privatetracker.server.api.plugin.respondSealed
+import org.privatetracker.server.api.plugin.sealedAnswer
 import org.privatetracker.server.api.plugin.toApiException
 import java.util.Base64
 
@@ -48,29 +50,41 @@ fun Route.healthRoutes(deps: ServerDependencies) {
         val config = deps.serverConfig.get()
         val now = deps.clock.now()
         val challenge = call.request.queryParameters[ApiV1.CHALLENGE_PARAM]?.takeIf(CHALLENGE::matches)
+        // Without one, trackers send nothing: they never fall back to plain bodies.
+        val encryptionKey = try {
+            deps.encryptionKeys.current()
+        } catch (e: DeviceKeyException) {
+            call.application.log.error("Encryption key unavailable", e)
+            null
+        }
         // Without a working key the server still answers; a paired tracker then refuses it, as it should.
+        // The signature names the encryption key, so nobody can swap in another one the server once signed.
         val identity = challenge?.let {
             try {
-                ServerIdentity(deps.serverKeys.publicKey(), Base64.getEncoder().encodeToString(deps.serverKeys.sign(serverIdentityInput(it, now))))
+                val input = serverIdentityInput(it, now, encryptionKey?.key?.id)
+                ServerIdentity(deps.serverKeys.publicKey(), Base64.getEncoder().encodeToString(deps.serverKeys.sign(input)))
             } catch (e: DeviceKeyException) {
                 call.application.log.error("Server key unavailable", e)
                 null
             }
         }
-        call.respond(ServerInfo(config.serverName, deps.serverVersion, ApiV1.PROTOCOL_VERSION, now, identity).toDto())
+        call.respond(ServerInfo(config.serverName, deps.serverVersion, ApiV1.PROTOCOL_VERSION, now, identity, encryptionKey).toDto())
     }
 }
 
 private val CHALLENGE = Regex("^[A-Za-z0-9_-]{16,64}$")
 
 fun Route.deviceRoutes(deps: ServerDependencies) {
-    // Signed with the key it carries: the tracker proves it holds the key it registers.
+    // Signed with the key it carries: the tracker proves it holds the key it registers. The key, the
+    // device's name and the pairing proof travel sealed, so they must be opened before anything is checked.
     post(ApiV1.REGISTER) {
         val body = call.receiveJsonBytes()
         val signed = call.signedRequest(body)
-        val registration = decodeJson(RegisterDeviceRequest.serializer(), body).toDomain().getOrThrowApi()
+        val opened = call.openSealed(deps, body)
+        val registration = decodeJson(RegisterDeviceRequest.serializer(), opened.plaintext, sealed = true).toDomain().getOrThrowApi()
         val result = deps.registerOrUpdateDevice(registration, signed, call.remoteAddressOrNull()).getOrThrowApi()
-        call.respond(if (result.created) HttpStatusCode.Created else HttpStatusCode.OK, result.toDto())
+        val answer = ProtocolJson.encodeToString(RegisterDeviceResponse.serializer(), result.toDto())
+        call.respondSealed(sealedAnswer(opened, answer), if (result.created) HttpStatusCode.Created else HttpStatusCode.OK)
     }
 
     get(ApiV1.DEVICES) {
@@ -95,7 +109,9 @@ fun Route.locationRoutes(deps: ServerDependencies) {
         // A device signs for itself only; its signature on another device's path proves nothing.
         if (signed.deviceId != deviceId) throw DomainError.AuthenticationFailed(AuthFailure.INVALID).toApiException()
         deps.authenticateDevice(signed).getOrThrowApi()
-        val request = decodeJson(LocationBatchRequest.serializer(), body)
+        // Opened only for a device the server let in, so nobody else makes it do key agreements.
+        val opened = call.openSealed(deps, body)
+        val request = decodeJson(LocationBatchRequest.serializer(), opened.plaintext, sealed = true)
         if (request.locations.isEmpty()) {
             throw ApiException(HttpStatusCode.BadRequest, ErrorCode.EMPTY_BATCH, "locations must not be empty")
         }
@@ -112,15 +128,15 @@ fun Route.locationRoutes(deps: ServerDependencies) {
 
         val result = deps.ingestLocationBatch(deviceId, valid, call.remoteAddressOrNull()).getOrThrowApi().toDto()
         val response = ProtocolJson.encodeToString(LocationBatchResponse.serializer(), result.copy(rejected = malformed + result.rejected))
-        // Signed acknowledgment: a paired tracker deletes nothing on an answer this server did not sign.
-        val bytes = response.encodeToByteArray()
+        // Signed acknowledgment, over the sealed answer: a paired tracker deletes nothing on an answer this server did not sign.
+        val bytes = sealedAnswer(opened, response)
         try {
             val ack = deps.serverKeys.sign(RequestSignature.ackInput(signed.nonce, bytes))
             call.response.header(RequestSignature.ACK_HEADER, Base64.getEncoder().encodeToString(ack))
         } catch (e: DeviceKeyException) {
             call.application.log.error("Server key unavailable; the acknowledgment goes unsigned", e)
         }
-        call.respondBytes(bytes, ContentType.Application.Json)
+        call.respondSealed(bytes)
     }
 }
 

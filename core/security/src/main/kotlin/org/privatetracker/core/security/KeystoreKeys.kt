@@ -46,19 +46,6 @@ class KeystoreKeys @Inject constructor() {
     /** The key and its self-signed certificate, for a TLS server. */
     suspend fun tlsEntry(alias: String): KeyStore.PrivateKeyEntry = keystore { entry(alias, tls = true) }
 
-    /** Keystore calls block, and generating a key can take a moment on secure hardware. */
-    private suspend fun <T> keystore(block: () -> T): T = withContext(Dispatchers.IO) {
-        try {
-            block()
-        } catch (e: GeneralSecurityException) {
-            throw DeviceKeyException("Keystore refused the key", e)
-        } catch (e: ProviderException) {
-            throw DeviceKeyException("Keystore failed", e)
-        } catch (e: IOException) {
-            throw DeviceKeyException("Keystore could not be loaded", e)
-        }
-    }
-
     private fun entry(alias: String, tls: Boolean): KeyStore.PrivateKeyEntry = synchronized(entries) {
         entries.getOrPut(alias) {
             val keyStore = KeyStore.getInstance(PROVIDER).apply { load(null) }
@@ -95,6 +82,19 @@ class KeystoreKeys @Inject constructor() {
 
     private companion object {
         const val PROVIDER = "AndroidKeyStore"
+    }
+}
+
+/** Keystore calls block, and generating a key can take a moment on secure hardware. */
+internal suspend fun <T> keystore(block: () -> T): T = withContext(Dispatchers.IO) {
+    try {
+        block()
+    } catch (e: GeneralSecurityException) {
+        throw DeviceKeyException("Keystore refused the key", e)
+    } catch (e: ProviderException) {
+        throw DeviceKeyException("Keystore failed", e)
+    } catch (e: IOException) {
+        throw DeviceKeyException("Keystore could not be loaded", e)
     }
 }
 

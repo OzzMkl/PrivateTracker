@@ -71,7 +71,12 @@ enum class ErrorCode {
     DEVICE_REJECTED,
 
     // QR pairing, from 0.3 on.
-    PAIRING_INVALID;
+    PAIRING_INVALID,
+
+    // End-to-end encryption, from 0.5 on.
+    ENCRYPTION_REQUIRED,
+    ENCRYPTION_KEY_UNKNOWN,
+    DECRYPTION_FAILED;
 
     /** RFC 9457 `type`: a URN, since the project owns no domain to host problem pages. */
     val problemType: String get() = "urn:privatetracker:problem:" + name.lowercase().replace('_', '-')

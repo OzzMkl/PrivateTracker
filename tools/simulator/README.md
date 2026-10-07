@@ -34,7 +34,9 @@ No ejecutes `installDist` ni `clean` mientras una corrida está en marcha, porqu
        --out simulator-runs/emulador
    ```
 
-   Cambia `3F9A-01BC-77D2-E410` por la huella de la pantalla **Servidor**. Aprueba los dispositivos «Simulador NN» en **Dispositivos**; las huellas deben coincidir con las de la consola. A mitad de la corrida, detén y vuelve a iniciar el servidor desde la app.
+   Cambia `3F9A-01BC-77D2-E410` por la huella de la pantalla **Servidor**. Aprueba los dispositivos «Simulador NN» en **Dispositivos**; las huellas deben coincidir con las de la consola. A mitad de la corrida, detén y vuelve a iniciar el servidor desde la app, y pulsa **Rotar clave ahora** en la tarjeta «Cifrado de extremo a extremo»: los Trackers deben tomar la clave nueva sin perder posiciones.
+
+   Desde la 0.5 el simulador cifra cada envío igual que un teléfono, así que debe ser de la misma versión que la app: recompila con `installDist` después de actualizar el código. Uno de otra versión falla con `SERVER_IDENTITY_MISMATCH` o `ENCRYPTION_REQUIRED`.
 4. Al terminar, detén el servidor en la app y verifica:
 
    ```sh
@@ -96,6 +98,21 @@ Los Trackers guardan las posiciones en su cola mientras el servidor no responde 
 | Repetidas | Tiene más de una fila en `server.db`. El índice único lo impide; si aparece, es un bug. |
 
 Cada corrida registra 10 dispositivos nuevos. Bórralos desde **Dispositivos** en la app antes de la siguiente.
+
+## Criterio de salida de 0.6: 30 días en menos de 2 s
+
+`history` llena de una vez el historial de un Tracker: 30 días hasta ahora, una posición por minuto (43 200), con una rutina de casa, trayecto al trabajo, paseo al mediodía y salidas de fin de semana. Lo sube cifrado, como un teléfono, al ritmo que permite el límite del servidor (60 envíos de 100 posiciones por minuto, unos 8 minutos).
+
+```sh
+simulator history --server https://192.168.1.50:8787 --fingerprint 3F9A-01BC-77D2-E410 --out simulator-runs/historial
+```
+
+1. Aprueba «Simulador 01» en **Dispositivos** cuando lo pida.
+2. Al terminar, en **Dispositivos** abre «Simulador 01» → **Ver recorridos** → **30 días**.
+3. El tiempo hasta que el recorrido queda dibujado sale en logcat: `adb logcat -s DeviceHistory`, en la línea `Historial: 43200 posiciones (… dibujadas), datos … ms, en pantalla … ms`. El criterio es que «en pantalla» quede por debajo de 2000 ms en un teléfono de gama media.
+4. `simulator verify --run simulator-runs/historial --pull` confirma que las 43 200 están en server.db.
+
+Con `--days` y `--interval` se cambia el tamaño; `--trackers` da varios dispositivos, cada uno con su historial.
 
 ## Archivos de una corrida
 

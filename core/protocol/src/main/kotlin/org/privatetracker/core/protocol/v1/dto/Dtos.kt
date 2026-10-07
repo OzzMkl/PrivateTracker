@@ -15,7 +15,29 @@ data class HealthResponse(
     /** From 0.3, when the request carried a challenge: the server's key and its signature over the challenge. */
     @SerialName("server_key") val serverKey: String? = null,
     val signature: String? = null,
+    /** From 0.5: what trackers seal their requests for, signed with the server's key. */
+    @SerialName("encryption_key") val encryptionKey: EncryptionKeyDto? = null,
 )
+
+@Serializable
+data class EncryptionKeyDto(
+    val id: String,
+    @SerialName("public_key") val publicKey: String,
+    @SerialName("use_until") val useUntil: String,
+    val signature: String,
+)
+
+/** A request body sealed for the server's encryption key [keyId], from 0.5 on. See SealedBodies. */
+@Serializable
+data class SealedRequestDto(
+    @SerialName("key_id") val keyId: String,
+    val enc: String,
+    val ciphertext: String,
+)
+
+/** A response body sealed for the tracker that sent the request, under a random [nonce]. */
+@Serializable
+data class SealedResponseDto(val nonce: String, val ciphertext: String)
 
 @Serializable
 data class RegisterDeviceRequest(

@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.privatetracker.core.data.mapper.millis
+import org.privatetracker.core.data.mapper.toInstant
 import org.privatetracker.core.data.mapper.toDomain
 import org.privatetracker.core.data.mapper.toEntity
 import org.privatetracker.core.database.ServerDatabase
@@ -18,6 +19,8 @@ import org.privatetracker.core.domain.model.DeviceWithLastLocation
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.SessionId
+import org.privatetracker.core.domain.model.TimeRange
+import org.privatetracker.core.domain.model.TrackPoint
 import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.repository.DeviceRepository
 import org.privatetracker.core.domain.repository.LocationRepository
@@ -79,6 +82,13 @@ class RoomLocationRepository @Inject constructor(
     }
 
     override suspend fun deleteReceivedBefore(cutoff: Instant): Int = locations.deleteReceivedBefore(cutoff.millis())
+
+    override suspend fun findTrackPoints(deviceId: DeviceId, range: TimeRange): List<TrackPoint> =
+        locations.findTrackPoints(deviceId.value, range.from.millis(), range.to.millis())
+            .map { TrackPoint(it.latitude, it.longitude, it.recordedAt.toInstant()) }
+
+    override suspend fun findRecorded(deviceId: DeviceId, range: TimeRange): List<Location> =
+        locations.findRecorded(deviceId.value, range.from.millis(), range.to.millis()).map { it.toDomain(deviceId.value) }
 }
 
 class RoomSessionRepository @Inject constructor(

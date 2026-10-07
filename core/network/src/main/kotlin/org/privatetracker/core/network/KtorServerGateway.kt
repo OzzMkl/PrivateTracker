@@ -27,6 +27,7 @@ import org.privatetracker.core.common.result.flatMap
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
+import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.RegistrationResult
@@ -42,6 +43,7 @@ import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.protocol.v1.ProtocolJson
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.v1.RequestSignature
+import org.privatetracker.core.protocol.v1.SealedBodies
 import org.privatetracker.core.protocol.v1.dto.HealthResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchRequest
 import org.privatetracker.core.protocol.v1.dto.LocationBatchResponse
@@ -54,8 +56,9 @@ import javax.net.ssl.SSLHandshakeException
 
 /**
  * Client for protocol v1. Every expected failure comes back as a [DomainError], never as an exception.
- * Every request goes over TLS to the server its pin names, through [clients]; device routes are also
- * signed with the device's key, see [RequestSignature].
+ * Every request goes over TLS to the server its pin names, through [clients]; device routes also travel
+ * sealed for the server's encryption key, see [SealedBodies], and signed with the device's key over
+ * the sealed bytes, see [RequestSignature].
  */
 class KtorServerGateway(
     private val clients: PinnedClients,
@@ -69,9 +72,14 @@ class KtorServerGateway(
             clients.clientFor(pin).get(url(serverUrl, ApiV1.HEALTH)) { challenge?.let { parameter(ApiV1.CHALLENGE_PARAM, it) } }
         }.flatMap { it.toDomain() }
 
-    override suspend fun register(serverUrl: String, pin: ServerPin, registration: DeviceRegistration): Outcome<RegistrationResult> {
+    override suspend fun register(
+        serverUrl: String,
+        pin: ServerPin,
+        registration: DeviceRegistration,
+        encryptionKey: EncryptionKey,
+    ): Outcome<RegistrationResult> {
         val body = ProtocolJson.encodeToString(RegisterDeviceRequest.serializer(), registration.toDto())
-        return postSigned(serverUrl, pin, ApiV1.REGISTER, registration.deviceId, body, RegisterDeviceResponse.serializer())
+        return postSealed(serverUrl, pin, ApiV1.REGISTER, registration.deviceId, body, encryptionKey, RegisterDeviceResponse.serializer())
             .flatMap { it.toDomain() }
     }
 
@@ -80,28 +88,35 @@ class KtorServerGateway(
         pin: ServerPin,
         deviceId: DeviceId,
         locations: List<Location>,
+        encryptionKey: EncryptionKey,
     ): Outcome<LocationBatchResult> {
         val body = ProtocolJson.encodeToString(LocationBatchRequest.serializer(), LocationBatchRequest(locations.map { it.toDto() }))
         // TLS already ties the answer to the pinned key; the signed acknowledgment holds even if TLS does not.
         val ackKey = (pin as? ServerPin.Key)?.publicKey
-        return postSigned(serverUrl, pin, ApiV1.locationsPath(deviceId.value), deviceId, body, LocationBatchResponse.serializer(), ackKey)
+        val path = ApiV1.locationsPath(deviceId.value)
+        return postSealed(serverUrl, pin, path, deviceId, body, encryptionKey, LocationBatchResponse.serializer(), ackKey)
             .flatMap { it.toDomain() }
     }
 
     /**
-     * Signs exactly the bytes it sends, so the server hashes the same body. Signing happens before the
-     * request, so a key store failure is reported as such instead of as a network error.
+     * Seals [body] for [encryptionKey] and signs exactly the sealed bytes it sends, so the server hashes
+     * the same body. Sealing and signing happen before the request, so a key store failure is reported
+     * as such instead of as a network error. Only an answer that opens with this request's key counts.
      */
-    private suspend fun <T> postSigned(
+    private suspend fun <T> postSealed(
         serverUrl: String,
         pin: ServerPin,
         path: String,
         deviceId: DeviceId,
         body: String,
+        encryptionKey: EncryptionKey,
         deserializer: DeserializationStrategy<T>,
         serverKey: String? = null,
     ): Outcome<T> {
-        val bytes = body.encodeToByteArray()
+        // Signed by the server's own key, yet not a P-256 key: nothing this tracker can seal for.
+        val sealed = SealedBodies.seal(encryptionKey, "POST", path, body.encodeToByteArray())
+            ?: return DomainError.EncryptionUnavailable.asFailure()
+        val bytes = sealed.body
         val created = clock.now().epochSecond
         val nonce = RequestSignature.newNonce(random)
         val input = RequestSignature.signingInput("POST", path, deviceId.value, created, nonce, bytes)
@@ -116,7 +131,7 @@ class KtorServerGateway(
                 ack != null && EcdsaP256.verify(key, RequestSignature.ackInput(nonce, responseBody), ack)
             }
         }
-        return exchange(deserializer, acknowledgedBy) {
+        return exchange(deserializer, acknowledgedBy, open = { SealedBodies.openResponse(sealed, it) }) {
             clients.clientFor(pin).post(url(serverUrl, path)) {
                 header(HttpHeaders.Authorization, RequestSignature.header(deviceId.value, created, nonce, signature))
                 setBody(ByteArrayContent(bytes, ContentType.Application.Json))
@@ -124,10 +139,14 @@ class KtorServerGateway(
         }
     }
 
-    /** [acknowledgedBy] checks a successful answer before it is believed; a failed check is a foreign server. */
+    /**
+     * [acknowledgedBy] checks a successful answer before it is believed; a failed check is a foreign
+     * server. [open] reads a sealed answer; one that does not open is no answer to this request.
+     */
     private suspend fun <T> exchange(
         deserializer: DeserializationStrategy<T>,
         acknowledgedBy: ((HttpResponse, ByteArray) -> Boolean)? = null,
+        open: ((ByteArray) -> ByteArray?)? = null,
         request: suspend () -> HttpResponse,
     ): Outcome<T> {
         val (response, bytes) = try {
@@ -146,8 +165,10 @@ class KtorServerGateway(
             return problem.toDomainError(response.status.value, retryAfter).asFailure()
         }
         if (acknowledgedBy != null && !acknowledgedBy(response, bytes)) return DomainError.ServerIdentityMismatch.asFailure()
+        val plain = if (open == null) body else open(bytes)?.decodeToString()
+            ?: return DomainError.Network.InvalidResponse("sealed answer does not open").asFailure()
         return try {
-            Outcome.Success(ProtocolJson.decodeFromString(deserializer, body))
+            Outcome.Success(ProtocolJson.decodeFromString(deserializer, plain))
         } catch (e: SerializationException) {
             DomainError.Network.InvalidResponse(e.message?.lineSequence()?.firstOrNull() ?: "unreadable body").asFailure()
         } catch (e: IllegalArgumentException) {

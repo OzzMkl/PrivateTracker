@@ -73,7 +73,8 @@ class TestServerConnection(
             ConnectionCheck(
                 server = info,
                 latency = started.elapsedNow().toJavaDuration(),
-                compatible = info.protocolVersion == ProtocolVersion.CURRENT,
+                // From 0.5 a server must also offer end-to-end encryption, or this tracker sends it nothing.
+                compatible = info.protocolVersion == ProtocolVersion.CURRENT && info.encryptionKey != null,
                 clockOffset = Duration.between(clock.now(), info.serverTime),
             )
         }

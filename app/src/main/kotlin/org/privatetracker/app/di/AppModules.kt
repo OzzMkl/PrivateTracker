@@ -12,6 +12,7 @@ import org.privatetracker.core.domain.model.AppInfo
 import org.privatetracker.core.domain.model.Platform
 import org.privatetracker.core.domain.port.BatteryLevelProvider
 import org.privatetracker.core.domain.port.DeviceKeys
+import org.privatetracker.core.domain.port.EncryptionKeyVault
 import org.privatetracker.core.domain.port.NetworkInfoProvider
 import org.privatetracker.core.domain.port.NonceRegistry
 import org.privatetracker.core.domain.port.PermissionChecker
@@ -25,6 +26,7 @@ import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.port.UploadScheduler
 import org.privatetracker.core.domain.repository.AppModeRepository
 import org.privatetracker.core.domain.repository.DeviceRepository
+import org.privatetracker.core.domain.repository.EncryptionKeyRepository
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.LocationRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
@@ -43,11 +45,15 @@ import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.CloseAllSessions
 import org.privatetracker.core.domain.usecase.server.CloseInactiveSessions
 import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
+import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
+import org.privatetracker.core.domain.usecase.server.ExportDeviceHistory
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
+import org.privatetracker.core.domain.usecase.server.GetDeviceTrack
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.GetServerKeyFingerprint
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
 import org.privatetracker.core.domain.usecase.server.ObserveDeviceDetail
+import org.privatetracker.core.domain.usecase.server.ObserveEncryptionKey
 import org.privatetracker.core.domain.usecase.server.ObserveDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.ObservePairedDevice
 import org.privatetracker.core.domain.usecase.server.ObserveServerStatus
@@ -56,6 +62,7 @@ import org.privatetracker.core.domain.usecase.server.RegisterOrUpdateDevice
 import org.privatetracker.core.domain.usecase.server.RemoveDevice
 import org.privatetracker.core.domain.usecase.server.RenameDevice
 import org.privatetracker.core.domain.usecase.server.RestoreServer
+import org.privatetracker.core.domain.usecase.server.RotateEncryptionKey
 import org.privatetracker.core.domain.usecase.server.SetDeviceApproval
 import org.privatetracker.core.domain.usecase.server.StartServer
 import org.privatetracker.core.domain.usecase.server.StopServer
@@ -65,6 +72,7 @@ import org.privatetracker.core.domain.usecase.server.VerifyRequestSignature
 import org.privatetracker.core.domain.usecase.tracker.FailOverServerAddress
 import org.privatetracker.core.domain.usecase.tracker.GetCurrentServer
 import org.privatetracker.core.domain.usecase.tracker.GetDeviceKeyFingerprint
+import org.privatetracker.core.domain.usecase.tracker.GetServerEncryptionKey
 import org.privatetracker.core.domain.usecase.tracker.ObserveTrackingStatus
 import org.privatetracker.core.domain.usecase.tracker.PairWithServer
 import org.privatetracker.core.domain.usecase.tracker.RecordLocation
@@ -211,6 +219,12 @@ object DomainModule {
 
     @Provides fun renameDevice(devices: DeviceRepository, transactions: TransactionRunner) = RenameDevice(devices, transactions)
 
+    @Provides fun getDeviceTrack(devices: DeviceRepository, locations: LocationRepository) = GetDeviceTrack(devices, locations)
+
+    @Provides
+    fun exportDeviceHistory(devices: DeviceRepository, locations: LocationRepository, clock: Clock) =
+        ExportDeviceHistory(devices, locations, clock)
+
     @Provides fun removeDevice(devices: DeviceRepository) = RemoveDevice(devices)
 
     @Provides
@@ -223,6 +237,15 @@ object DomainModule {
     @Provides fun observePairedDevice(tickets: PairingTicketStore, devices: DeviceRepository) = ObservePairedDevice(tickets, devices)
 
     @Provides fun getServerKeyFingerprint(serverKeys: ServerKeys) = GetServerKeyFingerprint(serverKeys)
+
+    /** Singleton: it serializes rotations and keeps opened keys in memory. */
+    @Provides @Singleton
+    fun encryptionKeyRing(keys: EncryptionKeyRepository, vault: EncryptionKeyVault, serverKeys: ServerKeys, clock: Clock) =
+        EncryptionKeyRing(keys, vault, serverKeys, clock)
+
+    @Provides fun observeEncryptionKey(ring: EncryptionKeyRing) = ObserveEncryptionKey(ring)
+
+    @Provides fun rotateEncryptionKey(ring: EncryptionKeyRing) = RotateEncryptionKey(ring)
 
     @Provides fun withdrawPairingInvite(tickets: PairingTicketStore) = WithdrawPairingInvite(tickets)
 
@@ -263,11 +286,16 @@ object DomainModule {
         identity: GetOrCreateDeviceIdentity,
         keys: DeviceKeys,
         verifyServer: VerifyServerIdentity,
+        encryptionKeys: GetServerEncryptionKey,
         appInfo: AppInfo,
         clock: Clock,
-    ) = RegisterDevice(gateway, config, state, identity, keys, verifyServer, appInfo, clock)
+    ) = RegisterDevice(gateway, config, state, identity, keys, verifyServer, encryptionKeys, appInfo, clock)
 
     @Provides fun verifyServerIdentity(gateway: ServerGateway, verifier: SignatureVerifier) = VerifyServerIdentity(gateway, verifier)
+
+    @Provides
+    fun getServerEncryptionKey(state: TrackerStateRepository, verifyServer: VerifyServerIdentity, clock: Clock) =
+        GetServerEncryptionKey(state, verifyServer, clock)
 
     @Provides
     fun pairWithServer(verifyServer: VerifyServerIdentity, config: TrackerConfigRepository, register: RegisterDevice, clock: Clock) =
@@ -290,9 +318,10 @@ object DomainModule {
         config: TrackerConfigRepository,
         state: TrackerStateRepository,
         register: RegisterDevice,
+        encryptionKeys: GetServerEncryptionKey,
         identity: GetOrCreateDeviceIdentity,
         clock: Clock,
-    ) = UploadPendingLocations(outbox, gateway, config, state, register, identity, clock)
+    ) = UploadPendingLocations(outbox, gateway, config, state, register, encryptionKeys, identity, clock)
 
     @Provides fun updateTrackerConfig(config: TrackerConfigRepository) = UpdateTrackerConfig(config)
 

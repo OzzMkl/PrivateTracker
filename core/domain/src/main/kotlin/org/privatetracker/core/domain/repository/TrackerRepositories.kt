@@ -7,6 +7,7 @@ import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.PendingLocation
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
+import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import java.time.Instant
 
 // Tracker-side storage. Implementations throw only on unexpected storage failures.
@@ -28,6 +29,8 @@ interface TrackerStateRepository {
     suspend fun setLastRecorded(location: Location)
     suspend fun registration(): TrackerRegistration?
     suspend fun setRegistration(registration: TrackerRegistration?)
+    suspend fun encryptionKey(): TrustedEncryptionKey?
+    suspend fun setEncryptionKey(key: TrustedEncryptionKey?)
 }
 
 interface IdentityRepository {

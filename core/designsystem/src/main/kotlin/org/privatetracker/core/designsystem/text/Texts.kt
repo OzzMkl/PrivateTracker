@@ -32,6 +32,8 @@ fun DomainError.message(): String = when (this) {
     DomainError.PairingInvalid -> stringResource(R.string.error_pairing_invalid)
     DomainError.ServerIdentityMismatch -> stringResource(R.string.error_server_identity)
     DomainError.ServerNotTrusted -> stringResource(R.string.error_server_not_trusted)
+    DomainError.EncryptionKeyUnknown -> stringResource(R.string.error_encryption_key_unknown)
+    DomainError.EncryptionUnavailable -> stringResource(R.string.error_encryption_unavailable)
     is DomainError.AuthenticationFailed -> stringResource(
         when (reason) {
             AuthFailure.EXPIRED -> R.string.error_signature_expired

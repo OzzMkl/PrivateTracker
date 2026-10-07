@@ -15,13 +15,16 @@ import androidx.compose.ui.unit.dp
 import org.privatetracker.core.map.maplibre.MapLibreMapView
 
 /**
- * The map of the app. Screens see markers and a camera only; MapLibre stays inside this module,
- * so the engine can change without touching them. The tile attribution is always visible.
+ * The map of the app. Screens see markers, tracks and a camera only; MapLibre stays inside this
+ * module, so the engine can change without touching them. The tile attribution is always visible.
+ * [onTracksDrawn] runs once the map has fully drawn a new set of [tracks].
  */
 @Composable
 fun PrivateTrackerMap(
     markers: List<MapMarker>,
     modifier: Modifier = Modifier,
+    tracks: List<MapTrack> = emptyList(),
+    onTracksDrawn: () -> Unit = {},
     camera: MapCamera = MapCamera.FitMarkers,
     selectedId: String? = null,
     interactive: Boolean = true,
@@ -33,6 +36,8 @@ fun PrivateTrackerMap(
     Box(modifier) {
         MapLibreMapView(
             markers = markers,
+            tracks = tracks,
+            onTracksDrawn = onTracksDrawn,
             camera = camera,
             selectedId = selectedId,
             interactive = interactive,

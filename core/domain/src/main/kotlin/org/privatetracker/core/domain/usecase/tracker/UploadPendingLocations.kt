@@ -15,9 +15,9 @@ import org.privatetracker.core.domain.repository.TrackerStateRepository
 import org.privatetracker.core.domain.usecase.common.GetOrCreateDeviceIdentity
 
 /**
- * Sends the outbox to the server in batches, oldest first. A location leaves the outbox only when the
- * server answers for it (accepted, duplicate or rejected); on any failure the outbox stays intact.
- * Callers must not run two uploads at once.
+ * Sends the outbox to the server in batches, oldest first, each sealed for the server's encryption
+ * key. A location leaves the outbox only when the server answers for it (accepted, duplicate or
+ * rejected); on any failure the outbox stays intact. Callers must not run two uploads at once.
  */
 class UploadPendingLocations(
     private val outbox: OutboxRepository,
@@ -25,6 +25,7 @@ class UploadPendingLocations(
     private val trackerConfig: TrackerConfigRepository,
     private val trackerState: TrackerStateRepository,
     private val registerDevice: RegisterDevice,
+    private val encryptionKeys: GetServerEncryptionKey,
     private val identity: GetOrCreateDeviceIdentity,
     private val clock: Clock,
 ) {
@@ -44,10 +45,15 @@ class UploadPendingLocations(
         val latest = trackerConfig.get()
         val pin = latest.serverPin.takeIf { latest.serverUrl == config.serverUrl } ?: config.serverPin
             ?: return UploadResult.Blocked(DomainError.ServerNotTrusted)
+        var encryptionKey = when (val key = encryptionKeys(config.serverUrl, pin)) {
+            is Outcome.Success -> key.value
+            is Outcome.Failure -> return failure(key.error, attempted = emptyList())
+        }
         var batchSize = minOf(config.batchSize, registration.maxBatchSize).coerceAtLeast(1)
         var sent = 0
         var rejected = 0
         var reRegistered = false
+        var keyRefreshed = false
         var batches = 0
 
         while (batches < maxBatches) {
@@ -55,7 +61,7 @@ class UploadPendingLocations(
             if (pending.isEmpty()) return UploadResult.Completed(sent, rejected, hasMore = false)
             val attempted = pending.map { it.location.id }
 
-            when (val result = gateway.uploadLocations(config.serverUrl, pin, deviceId, pending.map { it.location })) {
+            when (val result = gateway.uploadLocations(config.serverUrl, pin, deviceId, pending.map { it.location }, encryptionKey)) {
                 is Outcome.Success -> {
                     val acknowledged = result.value.acknowledgedIds()
                     if (acknowledged.isEmpty()) {
@@ -78,6 +84,16 @@ class UploadPendingLocations(
                             is Outcome.Failure -> return failure(again.error, attempted)
                         }
                         batchSize = minOf(batchSize, registration.maxBatchSize).coerceAtLeast(1)
+                    }
+
+                    // The server rotated its key: fetch the current one, once per run, and send again.
+                    DomainError.EncryptionKeyUnknown -> {
+                        if (keyRefreshed) return failure(error, attempted)
+                        keyRefreshed = true
+                        encryptionKey = when (val key = encryptionKeys(config.serverUrl, pin, refresh = true)) {
+                            is Outcome.Success -> key.value
+                            is Outcome.Failure -> return failure(key.error, attempted)
+                        }
                     }
 
                     is DomainError.BatchTooLarge -> {
@@ -114,6 +130,10 @@ class UploadPendingLocations(
         DomainError.DevicePendingApproval -> true
         // Another server at the address, for now: the coordinator looks for ours at the other addresses.
         DomainError.ServerIdentityMismatch -> true
+        // Rotated again while this run fetched the new key; the next run asks once more.
+        DomainError.EncryptionKeyUnknown -> true
+        // No key offered, as when the server's key store failed for a moment. Nothing is sent meanwhile.
+        DomainError.EncryptionUnavailable -> true
         else -> false
     }
 

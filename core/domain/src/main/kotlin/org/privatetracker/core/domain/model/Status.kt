@@ -12,6 +12,8 @@ data class TrackerActivity(
     val lastUploadAt: Instant? = null,
     /** Why the service stopped on its own, such as a revoked permission. */
     val error: DomainError? = null,
+    /** The phone lies still, so fixes come at the slower still interval. */
+    val still: Boolean = false,
 )
 
 /** Everything the tracker screen shows. */

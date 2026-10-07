@@ -10,6 +10,7 @@ import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.PendingLocation
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
+import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
 import org.privatetracker.core.domain.repository.TrackerConfigRepository
@@ -65,6 +66,7 @@ class MemoryOutbox(private val onDropped: (List<Location>) -> Unit) : OutboxRepo
 class MemoryTrackerState : TrackerStateRepository {
     @Volatile private var lastRecorded: Location? = null
     @Volatile private var registration: TrackerRegistration? = null
+    @Volatile private var encryptionKey: TrustedEncryptionKey? = null
 
     override suspend fun lastRecorded(): Location? = lastRecorded
     override suspend fun setLastRecorded(location: Location) {
@@ -74,6 +76,11 @@ class MemoryTrackerState : TrackerStateRepository {
     override suspend fun registration(): TrackerRegistration? = registration
     override suspend fun setRegistration(registration: TrackerRegistration?) {
         this.registration = registration
+    }
+
+    override suspend fun encryptionKey(): TrustedEncryptionKey? = encryptionKey
+    override suspend fun setEncryptionKey(key: TrustedEncryptionKey?) {
+        encryptionKey = key
     }
 }
 
