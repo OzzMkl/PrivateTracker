@@ -1,5 +1,11 @@
 package org.privatetracker.core.domain.usecase.tracker
 
+import java.time.Duration
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.privatetracker.core.common.result.DomainError
@@ -8,23 +14,22 @@ import org.privatetracker.core.domain.model.AppPermission
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.permissions
 import org.privatetracker.core.domain.testing.FakePermissionChecker
+import org.privatetracker.core.domain.testing.FakeServerKeys
 import org.privatetracker.core.domain.testing.FakeTrackingController
 import org.privatetracker.core.domain.testing.InMemoryAppModeRepository
 import org.privatetracker.core.domain.testing.InMemoryOutboxRepository
+import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.InMemoryTrackerConfigRepository
 import org.privatetracker.core.domain.testing.RecordingUploadScheduler
 import org.privatetracker.core.domain.testing.aLocation
 import org.privatetracker.core.domain.testing.failureError
 import org.privatetracker.core.domain.testing.successValue
-import java.time.Duration
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertIs
-import kotlin.test.assertTrue
+import org.privatetracker.core.domain.usecase.common.TrustOwnServer
+
+private val SERVER_KEY = FakeServerKeys.SERVER_KEY
 
 private class ControlFixture(
-    config: TrackerConfig = TrackerConfig(serverUrl = "http://192.168.1.10:8787", deviceName = "Pixel de Ana"),
+    config: TrackerConfig = TrackerConfig(serverUrl = "https://192.168.1.10:8787", deviceName = "Pixel de Ana", serverKey = SERVER_KEY),
     mode: AppMode? = AppMode.TRACKER,
 ) {
     val config = InMemoryTrackerConfigRepository(config)
@@ -35,7 +40,7 @@ private class ControlFixture(
     val outbox = InMemoryOutboxRepository()
     val start = StartTracking(this.config, permissions, controller)
     val stop = StopTracking(this.config, controller, scheduler)
-    val restore = RestoreTracking(modes, this.config, permissions, controller)
+    val restore = RestoreTracking(modes, this.config, permissions, controller, TrustOwnServer(this.config, InMemoryServerConfigRepository(), FakeServerKeys()))
     val observe = ObserveTrackingStatus(this.config, controller, outbox)
 }
 
@@ -60,6 +65,14 @@ class StartTrackingTest {
     }
 
     @Test
+    fun `without anything to trust the server by tracking does not start`() = runTest {
+        val fixture = ControlFixture(TrackerConfig(serverUrl = "https://192.168.1.10:8787", deviceName = "Pixel de Ana"))
+
+        assertEquals(DomainError.ServerNotTrusted, fixture.start().failureError())
+        assertEquals(0, fixture.controller.starts)
+    }
+
+    @Test
     fun `missing location or notification permission blocks the start`() = runTest {
         val fixture = ControlFixture()
         fixture.permissions.granted -= setOf(AppPermission.PRECISE_LOCATION, AppPermission.NOTIFICATIONS)
@@ -73,15 +86,15 @@ class StartTrackingTest {
     @Test
     fun `local network access is required only for a server on the local network`() = runTest {
         fun withoutLocalNetwork(serverUrl: String) =
-            ControlFixture(TrackerConfig(serverUrl = serverUrl, deviceName = "Pixel"))
+            ControlFixture(TrackerConfig(serverUrl = serverUrl, deviceName = "Pixel", serverKey = SERVER_KEY))
                 .also { it.permissions.granted -= AppPermission.LOCAL_NETWORK }
 
-        val lan = withoutLocalNetwork("http://192.168.1.10:8787").start().failureError()
+        val lan = withoutLocalNetwork("https://192.168.1.10:8787").start().failureError()
         assertEquals(setOf(AppPermission.LOCAL_NETWORK), assertIs<DomainError.Permission>(lan).permissions())
 
         // Same phone, and a VPN address such as Tailscale's: the system does not ask for local network access.
-        withoutLocalNetwork("http://127.0.0.1:8787").start().successValue()
-        withoutLocalNetwork("http://100.101.102.103:8787").start().successValue()
+        withoutLocalNetwork("https://127.0.0.1:8787").start().successValue()
+        withoutLocalNetwork("https://100.101.102.103:8787").start().successValue()
     }
 
     @Test
@@ -110,8 +123,9 @@ class StopTrackingTest {
 
 class RestoreTrackingTest {
     private fun enabled(startOnBoot: Boolean = true) = TrackerConfig(
-        serverUrl = "http://192.168.1.10:8787",
+        serverUrl = "https://192.168.1.10:8787",
         deviceName = "Pixel de Ana",
+        serverKey = SERVER_KEY,
         startOnBoot = startOnBoot,
         trackingEnabled = true,
     )
@@ -165,7 +179,7 @@ class RestoreTrackingTest {
 class ObserveTrackingStatusTest {
     @Test
     fun `status combines configuration, service activity and queue size`() = runTest {
-        val fixture = ControlFixture(TrackerConfig(serverUrl = "http://192.168.1.10:8787", maxQueueSize = 10))
+        val fixture = ControlFixture(TrackerConfig(serverUrl = "https://192.168.1.10:8787", serverKey = SERVER_KEY, maxQueueSize = 10))
         repeat(8) { fixture.outbox.enqueue(aLocation(it + 1), maxSize = 10) }
         fixture.controller.start()
 

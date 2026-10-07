@@ -67,3 +67,19 @@ data class DiscoveredServer(val url: String, val keyHint: String?)
  * a tracker from asking every server it finds; the signed health challenge is what proves identity.
  */
 fun serverKeyHint(publicKey: String): String? = keyFingerprint(publicKey)?.replace("-", "")
+
+/**
+ * What a tracker trusts its server by, from 0.4 on: the whole public key once known, or, until then,
+ * the fingerprint the server screen shows, typed in by hand. Never anything a server merely presents.
+ */
+sealed interface ServerPin {
+    fun matches(publicKey: String): Boolean
+
+    data class Key(val publicKey: String) : ServerPin {
+        override fun matches(publicKey: String): Boolean = publicKey == this.publicKey
+    }
+
+    data class Fingerprint(val fingerprint: String) : ServerPin {
+        override fun matches(publicKey: String): Boolean = keyFingerprint(publicKey) == fingerprint
+    }
+}

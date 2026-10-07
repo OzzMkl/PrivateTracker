@@ -19,6 +19,7 @@ data class TrackerConfigData(
     val trackingEnabled: Boolean = false,
     val serverKey: String = "",
     val serverAddresses: List<String> = emptyList(),
+    val serverFingerprint: String = "",
 )
 
 @Serializable

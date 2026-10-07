@@ -143,10 +143,10 @@ class DataStoreRepositoriesTest {
         val repository = DataStoreTrackerConfigRepository(store(tempFile(), TrackerConfigData.serializer(), TrackerConfigData(deviceName = "Pixel")))
         assertEquals("Pixel", repository.get().deviceName)
 
-        repository.update { it.copy(serverUrl = "http://192.168.1.10:8787", intervalSeconds = 30) }
+        repository.update { it.copy(serverUrl = "https://192.168.1.10:8787", intervalSeconds = 30) }
 
         val observed = repository.observe().first()
-        assertEquals("http://192.168.1.10:8787", observed.serverUrl)
+        assertEquals("https://192.168.1.10:8787", observed.serverUrl)
         assertEquals(30, observed.intervalSeconds)
     }
 
@@ -155,10 +155,10 @@ class DataStoreRepositoriesTest {
         val repository = DataStoreTrackerStateRepository(store(tempFile(), TrackerStateData.serializer(), TrackerStateData()))
         assertNull(repository.registration())
 
-        repository.setRegistration(TrackerRegistration("http://192.168.1.10:8787", 100, T0))
+        repository.setRegistration(TrackerRegistration("https://192.168.1.10:8787", 100, T0))
         repository.setLastRecorded(aLocation(1))
 
-        assertEquals(TrackerRegistration("http://192.168.1.10:8787", 100, T0), repository.registration())
+        assertEquals(TrackerRegistration("https://192.168.1.10:8787", 100, T0), repository.registration())
         val last = repository.lastRecorded()!!
         assertEquals(locationId(1), last.id)
         assertEquals(aLocation(1).latitude, last.latitude, 0.0)

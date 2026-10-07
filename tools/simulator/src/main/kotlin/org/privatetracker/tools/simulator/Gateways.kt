@@ -6,6 +6,7 @@ import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.port.ServerGateway
 import kotlin.random.Random
 
@@ -21,12 +22,12 @@ class RecordingGateway(
 
     override suspend fun uploadLocations(
         serverUrl: String,
+        pin: ServerPin,
         deviceId: DeviceId,
         locations: List<Location>,
-        serverKey: String?,
     ): Outcome<LocationBatchResult> {
         val started = System.nanoTime()
-        val result = delegate.uploadLocations(serverUrl, deviceId, locations, serverKey)
+        val result = delegate.uploadLocations(serverUrl, pin, deviceId, locations)
         if (result is Outcome.Success) {
             stats.answered(result.value, latencyMs = (System.nanoTime() - started) / 1_000_000)
             ledger.answered(deviceId, result.value)
@@ -50,16 +51,16 @@ class FaultInjectingGateway(
 
     override suspend fun uploadLocations(
         serverUrl: String,
+        pin: ServerPin,
         deviceId: DeviceId,
         locations: List<Location>,
-        serverKey: String?,
     ): Outcome<LocationBatchResult> {
-        if (!enabled) return delegate.uploadLocations(serverUrl, deviceId, locations, serverKey)
+        if (!enabled) return delegate.uploadLocations(serverUrl, pin, deviceId, locations)
         if (chance(plan.dropRate)) {
             stats.injectedDrops.incrementAndGet()
             return DomainError.Network.Unreachable.asFailure()
         }
-        val result = delegate.uploadLocations(serverUrl, deviceId, locations, serverKey)
+        val result = delegate.uploadLocations(serverUrl, pin, deviceId, locations)
         if (result is Outcome.Success && chance(plan.lostAckRate)) {
             stats.injectedLostAcks.incrementAndGet()
             return DomainError.Network.Timeout.asFailure()

@@ -195,6 +195,14 @@ private fun TrackerSection(form: TrackerForm, test: ConnectionTest, actions: Set
             error = form.errors["serverUrl"],
             keyboardType = KeyboardType.Uri,
         )
+        FormField(
+            value = form.serverFingerprint,
+            onValueChange = { value -> change { it.copy(serverFingerprint = value) } },
+            label = stringResource(R.string.tracker_server_fingerprint),
+            placeholder = stringResource(R.string.tracker_server_fingerprint_hint),
+            error = form.errors["serverFingerprint"],
+            keyboardType = KeyboardType.Ascii,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = actions.onTestConnection, enabled = test != ConnectionTest.Running) {
                 Text(stringResource(if (test == ConnectionTest.Running) R.string.tracker_testing else R.string.tracker_test))

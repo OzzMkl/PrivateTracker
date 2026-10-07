@@ -5,6 +5,7 @@ import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.map
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.LocationId
+import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
 import org.privatetracker.core.domain.model.UploadResult
 import org.privatetracker.core.domain.port.ServerGateway
@@ -30,13 +31,19 @@ class UploadPendingLocations(
     suspend operator fun invoke(maxBatches: Int = DEFAULT_MAX_BATCHES): UploadResult {
         val config = trackerConfig.get()
         if (config.serverUrl.isBlank()) return UploadResult.Blocked(DomainError.NotConfigured)
+        if (config.serverPin == null) return UploadResult.Blocked(DomainError.ServerNotTrusted)
         if (outbox.count() == 0) return UploadResult.Completed(sent = 0, rejected = 0, hasMore = false)
 
         val deviceId = identity()
-        var registration = when (val result = ensureRegistered(config.serverUrl)) {
+        var registration = when (val result = ensureRegistered(config)) {
             is Outcome.Success -> result.value
             is Outcome.Failure -> return failure(result.error, attempted = emptyList())
         }
+        // Registering may just have learned the whole key from a typed fingerprint; acknowledgments are
+        // checked with it. If the settings moved on to another address meanwhile, this run stays with the old one.
+        val latest = trackerConfig.get()
+        val pin = latest.serverPin.takeIf { latest.serverUrl == config.serverUrl } ?: config.serverPin
+            ?: return UploadResult.Blocked(DomainError.ServerNotTrusted)
         var batchSize = minOf(config.batchSize, registration.maxBatchSize).coerceAtLeast(1)
         var sent = 0
         var rejected = 0
@@ -48,8 +55,7 @@ class UploadPendingLocations(
             if (pending.isEmpty()) return UploadResult.Completed(sent, rejected, hasMore = false)
             val attempted = pending.map { it.location.id }
 
-            val serverKey = config.serverKey.ifBlank { null }
-            when (val result = gateway.uploadLocations(config.serverUrl, deviceId, pending.map { it.location }, serverKey)) {
+            when (val result = gateway.uploadLocations(config.serverUrl, pin, deviceId, pending.map { it.location })) {
                 is Outcome.Success -> {
                     val acknowledged = result.value.acknowledgedIds()
                     if (acknowledged.isEmpty()) {
@@ -67,7 +73,7 @@ class UploadPendingLocations(
                         if (reRegistered) return failure(error, attempted)
                         reRegistered = true
                         trackerState.setRegistration(null)
-                        registration = when (val again = ensureRegistered(config.serverUrl)) {
+                        registration = when (val again = ensureRegistered(config)) {
                             is Outcome.Success -> again.value
                             is Outcome.Failure -> return failure(again.error, attempted)
                         }
@@ -86,9 +92,10 @@ class UploadPendingLocations(
         return UploadResult.Completed(sent, rejected, hasMore = outbox.count() > 0)
     }
 
-    private suspend fun ensureRegistered(serverUrl: String): Outcome<TrackerRegistration> {
-        val known = trackerState.registration()
-        return if (known != null && known.serverUrl == serverUrl) Outcome.Success(known) else registerDevice().map { it.registration }
+    /** Registers again for another server, and for one trusted by its fingerprint only, so its whole key gets learned. */
+    private suspend fun ensureRegistered(config: TrackerConfig): Outcome<TrackerRegistration> {
+        val known = trackerState.registration()?.takeIf { it.serverUrl == config.serverUrl && config.serverKey.isNotBlank() }
+        return if (known != null) Outcome.Success(known) else registerDevice().map { it.registration }
     }
 
     private suspend fun failure(error: DomainError, attempted: List<LocationId>): UploadResult {

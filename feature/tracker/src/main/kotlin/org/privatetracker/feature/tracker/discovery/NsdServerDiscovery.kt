@@ -94,6 +94,6 @@ class NsdServerDiscovery @Inject constructor(@ApplicationContext context: Contex
 
     private fun servers(info: NsdServiceInfo, hosts: List<InetAddress>): List<DiscoveredServer> {
         val keyHint = info.attributes[LanAnnouncement.KEY_HINT_ATTRIBUTE]?.decodeToString()
-        return hosts.filterIsInstance<Inet4Address>().map { DiscoveredServer("http://${it.hostAddress}:${info.port}", keyHint) }
+        return hosts.filterIsInstance<Inet4Address>().map { DiscoveredServer("https://${it.hostAddress}:${info.port}", keyHint) }
     }
 }

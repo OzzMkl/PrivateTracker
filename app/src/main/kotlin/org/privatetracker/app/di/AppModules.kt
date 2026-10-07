@@ -5,8 +5,6 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
 import org.privatetracker.BuildConfig
 import org.privatetracker.core.common.id.IdGenerator
 import org.privatetracker.core.common.time.Clock
@@ -40,6 +38,7 @@ import org.privatetracker.core.domain.usecase.common.CheckPermissions
 import org.privatetracker.core.domain.usecase.common.GetOrCreateDeviceIdentity
 import org.privatetracker.core.domain.usecase.common.ObserveAppMode
 import org.privatetracker.core.domain.usecase.common.SetAppMode
+import org.privatetracker.core.domain.usecase.common.TrustOwnServer
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.CloseAllSessions
 import org.privatetracker.core.domain.usecase.server.CloseInactiveSessions
@@ -79,7 +78,8 @@ import org.privatetracker.core.domain.usecase.tracker.UploadPendingLocations
 import org.privatetracker.core.domain.usecase.tracker.VerifyServerIdentity
 import org.privatetracker.core.domain.validation.LocationValidator
 import org.privatetracker.core.network.KtorServerGateway
-import org.privatetracker.core.network.createProtocolHttpClient
+import org.privatetracker.core.network.OkHttpPinnedClients
+import org.privatetracker.core.network.PinnedClients
 import javax.inject.Singleton
 
 @Module
@@ -95,11 +95,13 @@ object AppModule {
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
+    /** One TLS client per server pin; each trusts only the server its pin names. */
     @Provides @Singleton
-    fun httpClient(appInfo: AppInfo): HttpClient =
-        createProtocolHttpClient(OkHttp.create(), "PrivateTracker-Tracker/${appInfo.version} (Android ${Build.VERSION.RELEASE})")
+    fun pinnedClients(appInfo: AppInfo): PinnedClients =
+        OkHttpPinnedClients("PrivateTracker-Tracker/${appInfo.version} (Android ${Build.VERSION.RELEASE})")
 
-    @Provides @Singleton fun gateway(client: HttpClient, keys: DeviceKeys, clock: Clock): ServerGateway = KtorServerGateway(client, keys, clock)
+    @Provides @Singleton
+    fun gateway(clients: PinnedClients, keys: DeviceKeys, clock: Clock): ServerGateway = KtorServerGateway(clients, keys, clock)
 }
 
 /**
@@ -124,9 +126,14 @@ object DomainModule {
         appModes: AppModeRepository,
         trackerConfig: TrackerConfigRepository,
         serverConfig: ServerConfigRepository,
+        trustOwnServer: TrustOwnServer,
         stopTracking: StopTracking,
         serverController: ServerController,
-    ) = SetAppMode(appModes, trackerConfig, serverConfig, stopTracking, serverController)
+    ) = SetAppMode(appModes, trackerConfig, serverConfig, trustOwnServer, stopTracking, serverController)
+
+    @Provides
+    fun trustOwnServer(trackerConfig: TrackerConfigRepository, serverConfig: ServerConfigRepository, serverKeys: ServerKeys) =
+        TrustOwnServer(trackerConfig, serverConfig, serverKeys)
 
     @Provides fun checkPermissions(checker: PermissionChecker) = CheckPermissions(checker)
 
@@ -305,7 +312,8 @@ object DomainModule {
         config: TrackerConfigRepository,
         checker: PermissionChecker,
         controller: TrackingController,
-    ) = RestoreTracking(appModes, config, checker, controller)
+        trustOwnServer: TrustOwnServer,
+    ) = RestoreTracking(appModes, config, checker, controller, trustOwnServer)
 
     @Provides
     fun observeTrackingStatus(config: TrackerConfigRepository, controller: TrackingController, outbox: OutboxRepository) =

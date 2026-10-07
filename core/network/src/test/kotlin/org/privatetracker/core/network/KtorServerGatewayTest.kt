@@ -16,6 +16,7 @@ import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.DeviceKeys
 import org.privatetracker.core.domain.testing.DEVICE_A
@@ -33,6 +34,8 @@ import org.privatetracker.core.protocol.v1.RequestSignature
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.util.Base64
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -40,18 +43,27 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private const val SERVER = "http://192.168.1.10:8787/"
+private const val SERVER = "https://192.168.1.10:8787/"
+
+/**
+ * The mock engine has no TLS; which pin each call carries is checked through the client it asks for.
+ * A fingerprint, so upload answers need no signed acknowledgment unless a test asks for one.
+ */
+private val PIN = ServerPin.Fingerprint("3F9A-01BC-77D2-E410")
 
 class KtorServerGatewayTest {
     private val requests = mutableListOf<HttpRequestData>()
     private val keys = InMemoryDeviceKeys()
+
+    private val pins = mutableListOf<ServerPin>()
 
     private fun gateway(handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData): KtorServerGateway {
         val engine = MockEngine { request ->
             requests += request
             handler(request)
         }
-        return KtorServerGateway(createProtocolHttpClient(engine, "PrivateTracker-Tracker/0.1.0"), keys, FakeClock())
+        val client = createProtocolHttpClient(engine, "PrivateTracker-Tracker/0.1.0")
+        return KtorServerGateway({ pin -> client.also { pins += pin } }, keys, FakeClock())
     }
 
     private fun MockRequestHandleScope.json(status: HttpStatusCode, body: String, extra: Pair<String, String>? = null) =
@@ -73,12 +85,12 @@ class KtorServerGatewayTest {
             )
         }
 
-        val result = gateway.register(SERVER, aRegistration()).successValue()
+        val result = gateway.register(SERVER, PIN, aRegistration()).successValue()
 
         assertTrue(result.created)
         val request = requests.single()
         assertEquals(HttpMethod.Post, request.method)
-        assertEquals("http://192.168.1.10:8787/api/v1/devices/register", request.url.toString())
+        assertEquals("https://192.168.1.10:8787/api/v1/devices/register", request.url.toString())
         assertEquals("PrivateTracker-Tracker/0.1.0", request.headers[HttpHeaders.UserAgent])
         assertEquals(ContentType.Application.Json, request.body.contentType?.withoutParameters())
         assertTrue(request.body.toByteArray().decodeToString().contains("\"protocol_version\":1"))
@@ -93,7 +105,7 @@ class KtorServerGatewayTest {
             )
         }
 
-        val result = gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation(1))).successValue()
+        val result = gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1))).successValue()
 
         assertEquals(listOf(locationId(1)), result.accepted)
         assertEquals("/api/v1/devices/${DEVICE_A.value}/locations", requests.single().url.encodedPath)
@@ -115,9 +127,9 @@ class KtorServerGatewayTest {
             }
         }
 
-        gateway.health(SERVER).successValue()
-        assertEquals(DeviceApproval.PENDING, gateway.register(SERVER, aRegistration()).successValue().approval)
-        gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation(1))).successValue()
+        gateway.health(SERVER, PIN).successValue()
+        assertEquals(DeviceApproval.PENDING, gateway.register(SERVER, PIN, aRegistration()).successValue().approval)
+        gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1))).successValue()
 
         assertNull(requests[0].headers[HttpHeaders.Authorization])
         val publicKey = keys.publicKey(DEVICE_A)
@@ -135,14 +147,14 @@ class KtorServerGatewayTest {
 
     @Test
     fun `a redirect is never followed, so a health challenge cannot be passed on to another server`() = runTest {
-        val gateway = gateway { respond("", HttpStatusCode.Found, headersOf(HttpHeaders.Location, "http://192.168.1.11:8787/api/v1/health")) }
+        val gateway = gateway { respond("", HttpStatusCode.Found, headersOf(HttpHeaders.Location, "https://192.168.1.11:8787/api/v1/health")) }
 
-        assertEquals(DomainError.Http(302), gateway.health(SERVER, challenge = "Y2hhbGxlbmdlLTEyMzQ1Ng").failureError())
+        assertEquals(DomainError.Http(302), gateway.health(SERVER, PIN, challenge = "Y2hhbGxlbmdlLTEyMzQ1Ng").failureError())
         assertEquals(1, requests.size)
     }
 
     @Test
-    fun `with a pinned key, an upload answer counts only if the server signed it`() = runTest {
+    fun `with a whole key pinned, an upload answer counts only if the server signed it`() = runTest {
         val serverKeys = InMemoryServerKeys()
         val answer = """{"accepted":["${locationId(1).value}"],"duplicates":[],"rejected":[],"server_time":"2026-10-02T18:00:00Z"}"""
         var signWith: InMemoryServerKeys? = serverKeys
@@ -151,15 +163,41 @@ class KtorServerGatewayTest {
             val ack = signWith?.sign(RequestSignature.ackInput(nonce, answer.encodeToByteArray()))
             json(HttpStatusCode.OK, answer, ack?.let { RequestSignature.ACK_HEADER to Base64.getEncoder().encodeToString(it) })
         }
-        val pinned = serverKeys.publicKey()
+        val pinned = ServerPin.Key(serverKeys.publicKey())
+        suspend fun upload(pin: ServerPin) = gateway.uploadLocations(SERVER, pin, DEVICE_A, listOf(aLocation(1)))
 
-        assertEquals(listOf(locationId(1)), gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation(1)), pinned).successValue().accepted)
+        assertEquals(listOf(locationId(1)), upload(pinned).successValue().accepted)
         signWith = InMemoryServerKeys()
-        assertEquals(DomainError.ServerIdentityMismatch, gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation(1)), pinned).failureError())
+        assertEquals(DomainError.ServerIdentityMismatch, upload(pinned).failureError())
         signWith = null
-        assertEquals(DomainError.ServerIdentityMismatch, gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation(1)), pinned).failureError())
-        // A server typed in by hand has no key to check against.
-        assertEquals(listOf(locationId(1)), gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation(1))).successValue().accepted)
+        assertEquals(DomainError.ServerIdentityMismatch, upload(pinned).failureError())
+        // Trusted by a typed fingerprint only, there is no whole key to check against; TLS is the check.
+        assertEquals(listOf(locationId(1)), upload(PIN).successValue().accepted)
+    }
+
+    @Test
+    fun `every call goes through the client of its pin`() = runTest {
+        val gateway = gateway { json(HttpStatusCode.NotFound, """{"type":"t","title":"t","status":404,"code":"DEVICE_NOT_REGISTERED"}""") }
+        val other = ServerPin.Fingerprint("0000-1111-2222-3333")
+
+        gateway.health(SERVER, PIN)
+        gateway.register(SERVER, other, aRegistration())
+        gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation(1)))
+
+        assertEquals(listOf<ServerPin>(PIN, other, PIN), pins)
+    }
+
+    @Test
+    fun `a server key the pin refuses is an identity mismatch, another failed handshake an invalid response`() = runTest {
+        val refused = gateway { throw SSLHandshakeException("handshake failed").apply { initCause(ServerKeyMismatchException()) } }
+        assertEquals(DomainError.ServerIdentityMismatch, refused.health(SERVER, PIN).failureError())
+
+        val plainHttp = gateway { throw SSLHandshakeException("WRONG_VERSION_NUMBER") }
+        assertIs<DomainError.Network.InvalidResponse>(plainHttp.health(SERVER, PIN).failureError())
+
+        // A TLS connection dropped after the handshake is the network, retried like any other.
+        val dropped = gateway { throw SSLException("Read error: ssl=0x7b, I/O error during system call, Connection reset by peer") }
+        assertEquals(DomainError.Network.Unreachable, dropped.health(SERVER, PIN).failureError())
     }
 
     @Test
@@ -172,9 +210,10 @@ class KtorServerGatewayTest {
             requests += request
             respond("", HttpStatusCode.OK)
         }
-        val gateway = KtorServerGateway(createProtocolHttpClient(engine, "PrivateTracker-Tracker/0.1.0"), broken, FakeClock())
+        val client = createProtocolHttpClient(engine, "PrivateTracker-Tracker/0.1.0")
+        val gateway = KtorServerGateway({ client }, broken, FakeClock())
 
-        assertEquals(DomainError.DeviceKeyUnavailable, gateway.uploadLocations(SERVER, DEVICE_A, listOf(aLocation())).failureError())
+        assertEquals(DomainError.DeviceKeyUnavailable, gateway.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError())
         assertTrue(requests.isEmpty())
     }
 
@@ -183,7 +222,7 @@ class KtorServerGatewayTest {
         val notRegistered = gateway {
             json(HttpStatusCode.NotFound, """{"type":"t","title":"t","status":404,"code":"DEVICE_NOT_REGISTERED"}""")
         }
-        assertEquals(DomainError.DeviceNotRegistered, notRegistered.uploadLocations(SERVER, DEVICE_A, listOf(aLocation())).failureError())
+        assertEquals(DomainError.DeviceNotRegistered, notRegistered.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError())
 
         val limited = gateway {
             json(
@@ -192,19 +231,19 @@ class KtorServerGatewayTest {
                 HttpHeaders.RetryAfter to "30",
             )
         }
-        assertEquals(DomainError.Http(429, "RATE_LIMITED", 30), limited.health(SERVER).failureError())
+        assertEquals(DomainError.Http(429, "RATE_LIMITED", 30), limited.health(SERVER, PIN).failureError())
 
         val pending = gateway {
             json(HttpStatusCode.Forbidden, """{"type":"t","title":"t","status":403,"code":"DEVICE_PENDING_APPROVAL"}""")
         }
-        assertEquals(DomainError.DevicePendingApproval, pending.uploadLocations(SERVER, DEVICE_A, listOf(aLocation())).failureError())
+        assertEquals(DomainError.DevicePendingApproval, pending.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError())
 
         val expired = gateway {
             json(HttpStatusCode.Unauthorized, """{"type":"t","title":"t","status":401,"code":"SIGNATURE_EXPIRED"}""")
         }
         assertEquals(
             DomainError.AuthenticationFailed(AuthFailure.EXPIRED),
-            expired.uploadLocations(SERVER, DEVICE_A, listOf(aLocation())).failureError(),
+            expired.uploadLocations(SERVER, PIN, DEVICE_A, listOf(aLocation())).failureError(),
         )
     }
 
@@ -212,19 +251,19 @@ class KtorServerGatewayTest {
     fun `an error page that is not a problem keeps only the status`() = runTest {
         val gateway = gateway { respond("<html>Bad Gateway</html>", HttpStatusCode.BadGateway) }
 
-        assertEquals(DomainError.Http(502), gateway.health(SERVER).failureError())
+        assertEquals(DomainError.Http(502), gateway.health(SERVER, PIN).failureError())
     }
 
     @Test
     fun `an unreadable success body is an invalid response`() = runTest {
         val gateway = gateway { json(HttpStatusCode.OK, """{"status":"ok"}""") }
 
-        assertIs<DomainError.Network.InvalidResponse>(gateway.health(SERVER).failureError())
+        assertIs<DomainError.Network.InvalidResponse>(gateway.health(SERVER, PIN).failureError())
     }
 
     @Test
     fun `connection failures and timeouts are network errors`() = runTest {
-        assertEquals(DomainError.Network.Unreachable, gateway { throw ConnectException("refused") }.health(SERVER).failureError())
-        assertEquals(DomainError.Network.Timeout, gateway { throw SocketTimeoutException("slow") }.health(SERVER).failureError())
+        assertEquals(DomainError.Network.Unreachable, gateway { throw ConnectException("refused") }.health(SERVER, PIN).failureError())
+        assertEquals(DomainError.Network.Timeout, gateway { throw SocketTimeoutException("slow") }.health(SERVER, PIN).failureError())
     }
 }

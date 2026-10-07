@@ -14,7 +14,8 @@
     <string name="error_device_rejected">El servidor rechazó este teléfono</string>
     <string name="error_device_key">No se pudo usar la clave de este teléfono</string>
     <string name="error_pairing_invalid">El código QR venció o ya lo usó otro teléfono: genera uno nuevo en el servidor</string>
-    <string name="error_server_identity">El servidor en esa dirección no es el tuyo: no demostró tener su clave</string>
+    <string name="error_server_identity">El servidor en esa dirección no es el tuyo: su clave no coincide con la huella ni con el código QR</string>
+    <string name="error_server_not_trusted">Falta la huella del servidor: escríbela en Ajustes o escanea su código QR</string>
     <string name="error_signature_expired">El reloj de este teléfono y el del servidor difieren más de 5 minutos</string>
     <string name="error_signature_replayed">El servidor ya había recibido esta petición</string>
     <string name="error_signature_invalid">El servidor no aceptó la firma de este teléfono</string>
@@ -34,6 +35,7 @@
     <string name="violation_out_of_range">Fuera del rango permitido</string>
     <string name="violation_invalid_format">Formato no válido</string>
     <string name="violation_too_long">Demasiado largo</string>
+    <string name="violation_https_required">El servidor solo acepta https://</string>
 
     <!-- Permissions, short names. -->
     <string name="permission_precise_location">Ubicación precisa</string>

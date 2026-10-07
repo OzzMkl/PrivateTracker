@@ -31,6 +31,7 @@ import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.DeviceKeys
 import org.privatetracker.core.domain.port.ServerGateway
@@ -49,37 +50,41 @@ import org.privatetracker.core.protocol.v1.dto.RegisterDeviceRequest
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceResponse
 import java.security.SecureRandom
 import java.util.Base64
+import javax.net.ssl.SSLHandshakeException
 
 /**
  * Client for protocol v1. Every expected failure comes back as a [DomainError], never as an exception.
- * Device routes are signed with the device's key; see [RequestSignature].
+ * Every request goes over TLS to the server its pin names, through [clients]; device routes are also
+ * signed with the device's key, see [RequestSignature].
  */
 class KtorServerGateway(
-    private val client: HttpClient,
+    private val clients: PinnedClients,
     private val keys: DeviceKeys,
     private val clock: Clock = Clock.System,
     private val random: SecureRandom = SecureRandom(),
 ) : ServerGateway {
 
-    override suspend fun health(serverUrl: String, challenge: String?): Outcome<ServerInfo> =
+    override suspend fun health(serverUrl: String, pin: ServerPin, challenge: String?): Outcome<ServerInfo> =
         exchange(HealthResponse.serializer()) {
-            client.get(url(serverUrl, ApiV1.HEALTH)) { challenge?.let { parameter(ApiV1.CHALLENGE_PARAM, it) } }
+            clients.clientFor(pin).get(url(serverUrl, ApiV1.HEALTH)) { challenge?.let { parameter(ApiV1.CHALLENGE_PARAM, it) } }
         }.flatMap { it.toDomain() }
 
-    override suspend fun register(serverUrl: String, registration: DeviceRegistration): Outcome<RegistrationResult> {
+    override suspend fun register(serverUrl: String, pin: ServerPin, registration: DeviceRegistration): Outcome<RegistrationResult> {
         val body = ProtocolJson.encodeToString(RegisterDeviceRequest.serializer(), registration.toDto())
-        return postSigned(serverUrl, ApiV1.REGISTER, registration.deviceId, body, RegisterDeviceResponse.serializer())
+        return postSigned(serverUrl, pin, ApiV1.REGISTER, registration.deviceId, body, RegisterDeviceResponse.serializer())
             .flatMap { it.toDomain() }
     }
 
     override suspend fun uploadLocations(
         serverUrl: String,
+        pin: ServerPin,
         deviceId: DeviceId,
         locations: List<Location>,
-        serverKey: String?,
     ): Outcome<LocationBatchResult> {
         val body = ProtocolJson.encodeToString(LocationBatchRequest.serializer(), LocationBatchRequest(locations.map { it.toDto() }))
-        return postSigned(serverUrl, ApiV1.locationsPath(deviceId.value), deviceId, body, LocationBatchResponse.serializer(), serverKey)
+        // TLS already ties the answer to the pinned key; the signed acknowledgment holds even if TLS does not.
+        val ackKey = (pin as? ServerPin.Key)?.publicKey
+        return postSigned(serverUrl, pin, ApiV1.locationsPath(deviceId.value), deviceId, body, LocationBatchResponse.serializer(), ackKey)
             .flatMap { it.toDomain() }
     }
 
@@ -89,6 +94,7 @@ class KtorServerGateway(
      */
     private suspend fun <T> postSigned(
         serverUrl: String,
+        pin: ServerPin,
         path: String,
         deviceId: DeviceId,
         body: String,
@@ -111,7 +117,7 @@ class KtorServerGateway(
             }
         }
         return exchange(deserializer, acknowledgedBy) {
-            client.post(url(serverUrl, path)) {
+            clients.clientFor(pin).post(url(serverUrl, path)) {
                 header(HttpHeaders.Authorization, RequestSignature.header(deviceId.value, created, nonce, signature))
                 setBody(ByteArrayContent(bytes, ContentType.Application.Json))
             }
@@ -130,7 +136,7 @@ class KtorServerGateway(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            return e.toNetworkError().asFailure()
+            return e.toDomainError().asFailure()
         }
         val body = bytes.decodeToString()
 
@@ -152,14 +158,27 @@ class KtorServerGateway(
     private fun url(serverUrl: String, path: String) = serverUrl.trimEnd('/') + path
 }
 
-internal fun Throwable.toNetworkError(): DomainError.Network = when (this) {
-    is HttpRequestTimeoutException,
-    is ConnectTimeoutException,
-    is io.ktor.client.network.sockets.SocketTimeoutException,
-    is java.net.SocketTimeoutException,
-    -> DomainError.Network.Timeout
-    else -> DomainError.Network.Unreachable
+/**
+ * A refused server key is the server's identity failing, not the network. Any other failed handshake,
+ * such as with a server that still speaks plain HTTP, means something that is not a PrivateTracker
+ * server answered; a connection dropped later is just the network.
+ */
+internal fun Throwable.toDomainError(): DomainError = when {
+    causes().any { it is ServerKeyMismatchException } -> DomainError.ServerIdentityMismatch
+    causes().any { it is SSLHandshakeException } -> DomainError.Network.InvalidResponse("TLS handshake failed")
+    else -> when (this) {
+        is HttpRequestTimeoutException,
+        is ConnectTimeoutException,
+        is io.ktor.client.network.sockets.SocketTimeoutException,
+        is java.net.SocketTimeoutException,
+        -> DomainError.Network.Timeout
+        else -> DomainError.Network.Unreachable
+    }
 }
+
+private fun Throwable.causes(): Sequence<Throwable> = generateSequence(this) { it.cause?.takeIf { cause -> cause !== it } }.take(MAX_CAUSES)
+
+private const val MAX_CAUSES = 16
 
 /** HTTP client configured for the protocol: no exceptions on error statuses, bounded timeouts, own User-Agent. */
 fun createProtocolHttpClient(engine: HttpClientEngine, userAgent: String): HttpClient = HttpClient(engine) {

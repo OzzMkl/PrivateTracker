@@ -10,6 +10,7 @@ import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.testing.FakePermissionChecker
 import org.privatetracker.core.domain.testing.FakeServerController
+import org.privatetracker.core.domain.testing.FakeServerKeys
 import org.privatetracker.core.domain.testing.FakeTrackingController
 import org.privatetracker.core.domain.testing.InMemoryAppModeRepository
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
@@ -32,6 +33,7 @@ class SetAppModeTest {
         modes,
         trackerConfig,
         serverConfig,
+        TrustOwnServer(trackerConfig, serverConfig, FakeServerKeys()),
         StopTracking(trackerConfig, tracking, RecordingUploadScheduler()),
         server,
     )
@@ -57,14 +59,37 @@ class SetAppModeTest {
     }
 
     @Test
-    fun `both roles on one phone point the tracker at its own server unless it has a url`() = runTest {
+    fun `both roles on one phone point the tracker at its own server, trusted by its key, unless it has a url`() = runTest {
         setMode(AppMode.TRACKER_AND_SERVER)
-        assertEquals("http://127.0.0.1:9000", trackerConfig.get().serverUrl)
+        assertEquals("https://127.0.0.1:9000", trackerConfig.get().serverUrl)
+        assertEquals(FakeServerKeys.SERVER_KEY, trackerConfig.get().serverKey)
 
-        trackerConfig.update { it.copy(serverUrl = "http://192.168.1.10:8787") }
+        trackerConfig.update { it.copy(serverUrl = "https://192.168.1.10:8787") }
         setMode(AppMode.TRACKER_AND_SERVER)
-        assertEquals("http://192.168.1.10:8787", trackerConfig.get().serverUrl)
+        assertEquals("https://192.168.1.10:8787", trackerConfig.get().serverUrl)
         assertEquals(0, tracking.stops)
+    }
+}
+
+class TrustOwnServerTest {
+    private val serverConfig = InMemoryServerConfigRepository(ServerConfig(port = 9000))
+
+    private suspend fun trustedKeyFor(config: TrackerConfig): String {
+        val trackerConfig = InMemoryTrackerConfigRepository(config)
+        TrustOwnServer(trackerConfig, serverConfig, FakeServerKeys())()
+        return trackerConfig.get().serverKey
+    }
+
+    @Test
+    fun `a tracker on the server's own phone with nothing pinned trusts that server's key, as after updating from 0_3`() = runTest {
+        assertEquals(FakeServerKeys.SERVER_KEY, trustedKeyFor(TrackerConfig(serverUrl = "https://127.0.0.1:9000")))
+    }
+
+    @Test
+    fun `another address or a pin already set is left alone`() = runTest {
+        assertEquals("", trustedKeyFor(TrackerConfig(serverUrl = "https://192.168.1.10:9000")))
+        assertEquals("", trustedKeyFor(TrackerConfig(serverUrl = "https://127.0.0.1:9000", serverFingerprint = "3F9A-01BC-77D2-E410")))
+        assertEquals("b2xk", trustedKeyFor(TrackerConfig(serverUrl = "https://127.0.0.1:9000", serverKey = "b2xk")))
     }
 }
 

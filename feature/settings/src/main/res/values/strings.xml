@@ -21,9 +21,11 @@
 
     <string name="settings_tracker">Rastreo</string>
     <string name="tracker_pair_qr">Emparejar con QR</string>
-    <string name="tracker_pair_qr_hint">Escanea el código que muestra el servidor: llena la dirección y aprueba este teléfono sin escribir nada. También puedes escribir la URL a mano.</string>
+    <string name="tracker_pair_qr_hint">Escanea el código que muestra el servidor: llena la dirección y aprueba este teléfono sin escribir nada. También puedes escribir la URL y la huella que muestra la pantalla del servidor.</string>
     <string name="tracker_server_url">URL del servidor</string>
-    <string name="tracker_server_url_hint">Por ejemplo http://192.168.1.10:8787</string>
+    <string name="tracker_server_url_hint">Por ejemplo https://192.168.1.10:8787</string>
+    <string name="tracker_server_fingerprint">Huella del servidor</string>
+    <string name="tracker_server_fingerprint_hint">Por ejemplo 3F9A-01BC-77D2-E410</string>
     <string name="settings_tracker_device_name">Nombre de este dispositivo</string>
     <string name="settings_tracker_interval">Intervalo (segundos)</string>
     <string name="tracker_min_distance">Distancia mínima (metros)</string>

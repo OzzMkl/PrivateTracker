@@ -139,12 +139,13 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun onTestConnection() {
-        val url = _state.value.tracker?.serverUrl ?: return
+        val form = _state.value.tracker ?: return
         _state.update { it.copy(connectionTest = ConnectionTest.Running) }
         viewModelScope.launch {
-            val test = when (val result = testServerConnection(url)) {
+            val test = when (val result = testServerConnection(form.serverUrl, form.serverFingerprint)) {
                 is Outcome.Success -> ConnectionTest.Passed(result.value)
                 is Outcome.Failure -> {
+                    (result.error as? DomainError.Validation)?.let { showTrackerErrors(it.violations) }
                     val noAnswer = result.error is DomainError.Network.Timeout || result.error == DomainError.Network.Unreachable
                     val localNetwork = AppPermission.LOCAL_NETWORK
                     val missing = permissions.isApplicable(localNetwork) && !permissions.isGranted(localNetwork)

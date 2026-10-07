@@ -12,7 +12,7 @@ import java.util.Base64
 /**
  * The content of a pairing QR code, a link any camera app can hand to PrivateTracker:
  *
- *     privatetracker://pair?v=1&name=Casa&url=http%3A%2F%2F192.168.1.50%3A8787&url=...&key=<base64url>&ticket=..&secret=..&expires=<epoch s>
+ *     privatetracker://pair?v=1&name=Casa&url=https%3A%2F%2F192.168.1.50%3A8787&url=...&key=<base64url>&ticket=..&secret=..&expires=<epoch s>
  *
  * Keys and secrets use Base64url so the QR stays small; [PairingInvite] keeps the protocol's Base64 key.
  */

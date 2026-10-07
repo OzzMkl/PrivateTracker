@@ -257,7 +257,7 @@ class PairingTest {
     fun `an invite carries the server's name, addresses and key, and a ticket that expires`() = runTest {
         val fixture = ServerFixture()
 
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
 
         assertEquals("PrivateTracker Server", invite.serverName)
         assertEquals(FakeServerKeys.SERVER_KEY, invite.serverKey)
@@ -270,7 +270,7 @@ class PairingTest {
     fun `a valid claim approves a new device at once, even while new devices are refused`() = runTest {
         val fixture = ServerFixture()
         fixture.config.update { it.copy(acceptNewDevices = false) }
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
 
         val result = fixture.register(aRegistration().copy(pairing = claim(invite)), "10.0.0.2").successValue()
 
@@ -283,7 +283,7 @@ class PairingTest {
     @Test
     fun `a ticket serves one phone, which may repeat its registration`() = runTest {
         val fixture = ServerFixture()
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
         fixture.register(aRegistration().copy(pairing = claim(invite))).successValue()
 
         fixture.register(aRegistration().copy(pairing = claim(invite))).successValue()
@@ -295,8 +295,8 @@ class PairingTest {
     @Test
     fun `expired, withdrawn, unknown or forged claims are refused and leave nothing behind`() = runTest {
         val fixture = ServerFixture()
-        val old = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val old = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
 
         assertEquals(DomainError.PairingInvalid, fixture.register(aRegistration().copy(pairing = claim(old))).failureError())
         val unknown = PairingClaim("nope", claim(invite).proof)
@@ -316,7 +316,7 @@ class PairingTest {
         val fixture = ServerFixture()
         fixture.register(aRegistration())
         fixture.setApproval(DEVICE_A, DeviceApproval.REJECTED).successValue()
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
 
         // Device ids travel in the clear: someone with a ticket must not take over this one.
         val newKey = fakePublicKey(DEVICE_A, generation = 2)
@@ -332,7 +332,7 @@ class PairingTest {
     @Test
     fun `a used ticket only serves its phone's retries, and not once the owner rejected or removed it`() = runTest {
         val fixture = ServerFixture()
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
         val paired = aRegistration().copy(pairing = claim(invite))
         fixture.register(paired).successValue()
 
@@ -348,7 +348,7 @@ class PairingTest {
     @Test
     fun `a proof is worth nothing for another device, and a withdrawn ticket for anyone`() = runTest {
         val fixture = ServerFixture()
-        val invite = fixture.createInvite(listOf("http://192.168.1.50:8787")).successValue()
+        val invite = fixture.createInvite(listOf("https://192.168.1.50:8787")).successValue()
 
         val borrowed = aRegistration(id = DEVICE_B).copy(pairing = claim(invite, DEVICE_A))
         assertEquals(DomainError.PairingInvalid, fixture.register(borrowed).failureError())

@@ -1,5 +1,7 @@
 package org.privatetracker.core.domain.usecase.tracker
 
+import java.net.URI
+import java.time.Duration
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import org.privatetracker.core.common.result.DomainError
@@ -17,9 +19,8 @@ import org.privatetracker.core.domain.port.UploadScheduler
 import org.privatetracker.core.domain.repository.AppModeRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
 import org.privatetracker.core.domain.repository.TrackerConfigRepository
+import org.privatetracker.core.domain.usecase.common.TrustOwnServer
 import org.privatetracker.core.domain.validation.TrackerConfigValidator
-import java.net.URI
-import java.time.Duration
 
 /**
  * Permissions tracking cannot run without. A start from the background, as at boot, also needs
@@ -46,6 +47,7 @@ class StartTracking(
     suspend operator fun invoke(): Outcome<Unit> {
         val config = trackerConfig.get()
         if (config.serverUrl.isBlank()) return DomainError.NotConfigured.asFailure()
+        if (config.serverPin == null) return DomainError.ServerNotTrusted.asFailure()
         val violations = TrackerConfigValidator.validate(config)
         if (violations.isNotEmpty()) return DomainError.Validation(violations).asFailure()
         val missing = missingTrackingPermissions(config, checker, fromBackground = false)
@@ -76,15 +78,18 @@ enum class RestoreResult { STARTED, ALREADY_RUNNING, NOT_WANTED, NOT_CONFIGURED,
 
 /**
  * Starts tracking again after a reboot or after the process died, but only if the user still wants it.
- * At boot it also needs [TrackerConfig.startOnBoot] and location "all the time".
+ * At boot it also needs [TrackerConfig.startOnBoot] and location "all the time". A tracker on the
+ * server's own phone first trusts that server's key; see [TrustOwnServer].
  */
 class RestoreTracking(
     private val appModes: AppModeRepository,
     private val trackerConfig: TrackerConfigRepository,
     private val checker: PermissionChecker,
     private val controller: TrackingController,
+    private val trustOwnServer: TrustOwnServer,
 ) {
     suspend operator fun invoke(trigger: RestoreTrigger): RestoreResult {
+        trustOwnServer()
         val config = trackerConfig.get()
         if (appModes.get()?.tracks != true || !config.trackingEnabled) return RestoreResult.NOT_WANTED
         if (trigger == RestoreTrigger.BOOT && !config.startOnBoot) return RestoreResult.NOT_WANTED

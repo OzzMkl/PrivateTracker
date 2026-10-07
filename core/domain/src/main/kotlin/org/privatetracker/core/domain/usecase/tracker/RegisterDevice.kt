@@ -11,6 +11,7 @@ import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.PairingClaim
 import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.ProtocolVersion
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.TrackerRegistration
 import org.privatetracker.core.domain.model.pairingProof
 import org.privatetracker.core.domain.port.DeviceKeyException
@@ -23,8 +24,9 @@ import org.privatetracker.core.domain.usecase.common.GetOrCreateDeviceIdentity
 /**
  * Introduces this tracker and its public key to the configured server and remembers the limits the
  * server announced. Registering again is harmless; a new device then waits for the owner's approval,
- * unless it registers from a QR [pairing] invite. With a pinned server key, the server must prove it
- * holds that key first, so this tracker never introduces itself to a server that took over the address.
+ * unless it registers from a QR [pairing] invite. The server must first prove it holds the key this
+ * tracker trusts, so this tracker never introduces itself to a server that took over the address.
+ * A server trusted by its fingerprint only gives its whole key here, and the tracker keeps it.
  */
 class RegisterDevice(
     private val gateway: ServerGateway,
@@ -44,9 +46,16 @@ class RegisterDevice(
         val config = trackerConfig.get()
         val serverUrl = pairing?.serverUrl ?: config.serverUrl
         if (serverUrl.isBlank()) return DomainError.NotConfigured.asFailure()
+        val pin = pairing?.let { ServerPin.Key(it.invite.serverKey) } ?: config.serverPin
+            ?: return DomainError.ServerNotTrusted.asFailure()
         // Pairing has just checked the server itself.
-        if (pairing == null && config.serverKey.isNotBlank()) {
-            verifyServer(serverUrl, config.serverKey).let { if (it is Outcome.Failure) return it }
+        val learnedKey = if (pairing == null) {
+            when (val check = verifyServer(serverUrl, pin)) {
+                is Outcome.Failure -> return check
+                is Outcome.Success -> check.value.takeIf { pin is ServerPin.Fingerprint }
+            }
+        } else {
+            null
         }
 
         val deviceId = identity()
@@ -64,7 +73,18 @@ class RegisterDevice(
             publicKey = publicKey,
             pairing = pairing?.invite?.let { PairingClaim(it.ticketId, pairingProof(it.secret, deviceId, publicKey)) },
         )
-        return gateway.register(serverUrl, registration).map { result ->
+        // Once learned, the whole key is what the registration's TLS must match.
+        return gateway.register(serverUrl, learnedKey?.let(ServerPin::Key) ?: pin, registration).map { result ->
+            if (learnedKey != null) {
+                // Unless the settings moved on to another server meanwhile.
+                trackerConfig.update {
+                    if (it.serverUrl == serverUrl && it.serverKey.isBlank() && it.serverPin == pin) {
+                        it.copy(serverKey = learnedKey, serverFingerprint = "")
+                    } else {
+                        it
+                    }
+                }
+            }
             val stored = TrackerRegistration(serverUrl, result.maxBatchSize, clock.now())
             trackerState.setRegistration(stored)
             RegistrationOutcome(stored, result.approval)

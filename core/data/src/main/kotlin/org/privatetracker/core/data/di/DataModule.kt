@@ -28,6 +28,7 @@ import org.privatetracker.core.database.tracker.OutboxDao
 import org.privatetracker.core.datastore.AppModeData
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.ServerConfigData
+import org.privatetracker.core.datastore.HttpsAddressesMigration
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
 import org.privatetracker.core.datastore.createJsonDataStore
@@ -60,7 +61,13 @@ object StorageModule {
 
     @Provides @Singleton
     fun trackerConfigStore(@ApplicationContext context: Context): DataStore<TrackerConfigData> =
-        createJsonDataStore(context, "tracker_config", TrackerConfigData.serializer(), TrackerConfigData(deviceName = Build.MODEL))
+        createJsonDataStore(
+            context,
+            "tracker_config",
+            TrackerConfigData.serializer(),
+            TrackerConfigData(deviceName = Build.MODEL),
+            migrations = listOf(HttpsAddressesMigration),
+        )
 
     @Provides @Singleton
     fun serverConfigStore(@ApplicationContext context: Context): DataStore<ServerConfigData> =

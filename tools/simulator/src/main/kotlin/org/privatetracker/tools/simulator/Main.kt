@@ -1,12 +1,11 @@
 package org.privatetracker.tools.simulator
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import org.privatetracker.core.domain.model.normalizeFingerprint
 import org.privatetracker.core.domain.validation.TrackerConfigValidator
 import org.privatetracker.core.network.KtorServerGateway
-import org.privatetracker.core.network.createProtocolHttpClient
+import org.privatetracker.core.network.OkHttpPinnedClients
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.LocalDateTime
@@ -18,11 +17,12 @@ import kotlin.system.exitProcess
 
 private val USAGE = """
     Uso:
-      simulator run --server URL [opciones]
+      simulator run --server URL --fingerprint HUELLA [opciones]
       simulator verify --run CARPETA (--pull | --db ARCHIVO) [opciones]
 
     run: Trackers simulados envían posiciones al servidor y anotan cada una en CARPETA/ledger.csv.
       --server URL         URL del servidor, como en los ajustes del Tracker (obligatoria)
+      --fingerprint HUELLA huella del servidor, la que muestra su pantalla (obligatoria)
       --trackers N         Trackers simulados (10)
       --interval D         una posición por Tracker cada D (60s)
       --duration D         duración de la corrida (24h)
@@ -69,12 +69,17 @@ fun main(args: Array<String>) {
 }
 
 private fun runCommand(cli: CommandLine): Int {
-    val serverUrl = cli.required("--server")
+    val serverUrl = TrackerConfigValidator.normalizeServerUrl(cli.required("--server"))
     TrackerConfigValidator.validateServerUrl(serverUrl)?.let {
-        throw UsageException("URL de servidor inválida: $serverUrl (ejemplo: http://192.168.1.50:8787)")
+        throw UsageException("URL de servidor inválida: $serverUrl (ejemplo: https://192.168.1.50:8787)")
+    }
+    val fingerprint = normalizeFingerprint(cli.required("--fingerprint"))
+    TrackerConfigValidator.validateServerFingerprint(fingerprint)?.let {
+        throw UsageException("Huella inválida: $fingerprint (16 dígitos hexadecimales, como 3F9A-01BC-77D2-E410)")
     }
     val options = SimulationOptions(
-        serverUrl = TrackerConfigValidator.normalizeServerUrl(serverUrl),
+        serverUrl = serverUrl,
+        serverFingerprint = fingerprint,
         trackers = cli.int("--trackers", 10, 1..1_000),
         interval = cli.duration("--interval", "60s"),
         duration = cli.duration("--duration", "24h"),
@@ -91,7 +96,7 @@ private fun runCommand(cli: CommandLine): Int {
     )
     cli.rejectUnknown()
 
-    val clients = mutableListOf<HttpClient>()
+    val clients = mutableListOf<OkHttpPinnedClients>()
     val stop = CompletableDeferred<Unit>()
     val finished = CountDownLatch(1)
     val exitCode = AtomicInteger(1)
@@ -108,10 +113,11 @@ private fun runCommand(cli: CommandLine): Int {
         val result = runBlocking {
             Simulation(
                 options = options,
+                // Clients of their own per tracker, as on separate phones.
                 gatewayFactory = { keys ->
-                    val client = createProtocolHttpClient(OkHttp.create(), USER_AGENT)
-                    synchronized(clients) { clients += client }
-                    KtorServerGateway(client, keys)
+                    val pinned = OkHttpPinnedClients(USER_AGENT)
+                    synchronized(clients) { clients += pinned }
+                    KtorServerGateway(pinned, keys)
                 },
             ).run(stop)
         }

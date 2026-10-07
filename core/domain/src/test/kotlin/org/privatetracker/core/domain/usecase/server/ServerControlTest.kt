@@ -91,9 +91,9 @@ class ObserveServerStatusTest {
 
         assertEquals(
             listOf(
-                ServerAddress("http://192.168.1.20:8787", AddressKind.LAN),
-                ServerAddress("http://100.101.102.103:8787", AddressKind.VPN),
-                ServerAddress("http://127.0.0.1:8787", AddressKind.LOOPBACK),
+                ServerAddress("https://192.168.1.20:8787", AddressKind.LAN),
+                ServerAddress("https://100.101.102.103:8787", AddressKind.VPN),
+                ServerAddress("https://127.0.0.1:8787", AddressKind.LOOPBACK),
             ),
             observe().first().addresses,
         )
@@ -104,13 +104,13 @@ class ObserveServerStatusTest {
         config.update { it.copy(bindAddress = "127.0.0.1") }
         controller.start()
 
-        assertEquals(listOf("http://127.0.0.1:8787"), observe().first().addresses.map { it.url })
+        assertEquals(listOf("https://127.0.0.1:8787"), observe().first().addresses.map { it.url })
     }
 }
 
 class UpdateServerConfigTest {
     private val serverConfig = InMemoryServerConfigRepository(ServerConfig(port = 8787))
-    private val trackerConfig = InMemoryTrackerConfigRepository(TrackerConfig(serverUrl = "http://127.0.0.1:8787"))
+    private val trackerConfig = InMemoryTrackerConfigRepository(TrackerConfig(serverUrl = "https://127.0.0.1:8787"))
     private val update = UpdateServerConfig(serverConfig, trackerConfig)
 
     @Test
@@ -119,16 +119,16 @@ class UpdateServerConfigTest {
 
         assertTrue(result.restartRequired)
         assertEquals(9000, serverConfig.get().port)
-        assertEquals("http://127.0.0.1:9000", trackerConfig.get().serverUrl)
+        assertEquals("https://127.0.0.1:9000", trackerConfig.get().serverUrl)
     }
 
     @Test
     fun `a tracker reporting to another server keeps its url`() = runTest {
-        trackerConfig.update { it.copy(serverUrl = "http://192.168.1.10:8787") }
+        trackerConfig.update { it.copy(serverUrl = "https://192.168.1.10:8787") }
 
         update(ServerConfig(port = 9000)).successValue()
 
-        assertEquals("http://192.168.1.10:8787", trackerConfig.get().serverUrl)
+        assertEquals("https://192.168.1.10:8787", trackerConfig.get().serverUrl)
     }
 
     @Test

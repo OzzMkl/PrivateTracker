@@ -90,8 +90,12 @@ class FakeServerDiscovery : ServerDiscovery {
     val found = mutableListOf<DiscoveredServer>()
     var calls = 0
 
+    /** Runs while discovery listens, as something the user does meanwhile. */
+    var onDiscover: suspend () -> Unit = {}
+
     override suspend fun discover(timeout: Duration): List<DiscoveredServer> {
         calls++
+        onDiscover()
         return found.toList()
     }
 }

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir
 import org.privatetracker.core.common.id.IdGenerator
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.DeviceApproval
+import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.service.SessionTracker
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
@@ -47,6 +48,7 @@ class SimulationTest {
     lateinit var dir: Path
 
     private val store = InMemoryServerStore()
+    private val serverKeys = InMemoryServerKeys()
     private val outage = AtomicBoolean(false)
 
     /** Room runs one write transaction at a time; so does this. */
@@ -64,7 +66,7 @@ class SimulationTest {
             serverVersion = "0.1.0",
             clock = clock,
             serverConfig = config,
-            serverKeys = InMemoryServerKeys(),
+            serverKeys = serverKeys,
             registerOrUpdateDevice = RegisterOrUpdateDevice(
                 store, config, sessions, EcdsaP256, verifySignature, InMemoryPairingTicketStore(), serialTransactions, clock,
             ),
@@ -79,8 +81,9 @@ class SimulationTest {
         )
     }
 
-    private fun options(faults: FaultPlan = FaultPlan()) = SimulationOptions(
-        serverUrl = "http://localhost",
+    private suspend fun options(faults: FaultPlan = FaultPlan()) = SimulationOptions(
+        serverUrl = "https://localhost",
+        serverFingerprint = keyFingerprint(serverKeys.publicKey())!!,
         trackers = 10,
         interval = Duration.ofMillis(20),
         duration = Duration.ofSeconds(2),
@@ -114,7 +117,11 @@ class SimulationTest {
         val options = options(FaultPlan(dropRate = 0.3, lostAckRate = 0.3))
         val simulation = Simulation(
             options = options,
-            gatewayFactory = { keys -> KtorServerGateway(createClient { expectSuccess = false }, keys) },
+            gatewayFactory = { keys ->
+                // The test client has no TLS; the fingerprint still has to match the key health proves.
+                val client = createClient { expectSuccess = false }
+                KtorServerGateway({ client }, keys)
+            },
             out = PrintStream(OutputStream.nullOutputStream()),
         )
 
@@ -155,7 +162,11 @@ class SimulationTest {
         val stop = CompletableDeferred<Unit>()
         val simulation = Simulation(
             options = options,
-            gatewayFactory = { keys -> KtorServerGateway(createClient { expectSuccess = false }, keys) },
+            gatewayFactory = { keys ->
+                // The test client has no TLS; the fingerprint still has to match the key health proves.
+                val client = createClient { expectSuccess = false }
+                KtorServerGateway({ client }, keys)
+            },
             out = PrintStream(OutputStream.nullOutputStream()),
         )
 

@@ -16,4 +16,18 @@ fun keyFingerprint(publicKey: String): String? {
         .joinToString("-")
 }
 
+/**
+ * A fingerprint as someone typed it: spaces, dashes and colons dropped, letters upper-cased, then
+ * grouped as [keyFingerprint] writes it. Text that is not 16 hex digits comes back trimmed, for the
+ * validator to refuse.
+ */
+fun normalizeFingerprint(raw: String): String {
+    val digits = raw.filterNot { it.isWhitespace() || it == '-' || it == ':' }.uppercase()
+    val valid = digits.length == FINGERPRINT_BYTES * 2 && digits.all { it in '0'..'9' || it in 'A'..'F' }
+    return if (valid) digits.chunked(4).joinToString("-") else raw.trim()
+}
+
+fun isValidFingerprint(value: String): Boolean = FINGERPRINT.matches(value)
+
 private const val FINGERPRINT_BYTES = 8
+private val FINGERPRINT = Regex("^[0-9A-F]{4}(-[0-9A-F]{4}){3}$")

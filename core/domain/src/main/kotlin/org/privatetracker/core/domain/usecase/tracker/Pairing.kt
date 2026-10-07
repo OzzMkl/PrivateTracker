@@ -8,10 +8,8 @@ import org.privatetracker.core.common.result.map
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.PairingInvite
-import org.privatetracker.core.domain.model.ServerInfo
-import org.privatetracker.core.domain.model.keyFingerprint
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.serverIdentityInput
-import org.privatetracker.core.domain.model.serverKeyHint
 import org.privatetracker.core.domain.port.ServerDiscovery
 import org.privatetracker.core.domain.port.ServerGateway
 import org.privatetracker.core.domain.port.SignatureVerifier
@@ -22,25 +20,29 @@ import java.time.Instant
 import java.util.Base64
 
 /**
- * Asks the server at [invoke]'s url to sign a fresh challenge and checks the answer against the key
- * this tracker pinned. Tells this tracker's server apart from any other that took over the address.
+ * Asks the server at [invoke]'s url to sign a fresh challenge and checks the answer against what this
+ * tracker trusts it by. Tells this tracker's server apart from any other that took over the address,
+ * and gives the server's whole key, which a [ServerPin.Fingerprint] alone does not.
  */
 class VerifyServerIdentity(
     private val gateway: ServerGateway,
     private val verifier: SignatureVerifier,
     private val random: SecureRandom = SecureRandom(),
 ) {
-    suspend operator fun invoke(serverUrl: String, expectedKey: String): Outcome<ServerInfo> {
+    /** The key the server proved to hold. */
+    suspend operator fun invoke(serverUrl: String, pin: ServerPin): Outcome<String> {
         val challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(CHALLENGE_BYTES).also(random::nextBytes))
-        return when (val outcome = gateway.health(serverUrl, challenge)) {
+        return when (val outcome = gateway.health(serverUrl, pin, challenge)) {
             is Outcome.Failure -> outcome
             is Outcome.Success -> {
                 val info = outcome.value
-                val identity = info.identity
-                val signature = identity?.let { runCatching { Base64.getDecoder().decode(it.signature) }.getOrNull() }
-                val genuine = identity != null && signature != null && identity.publicKey == expectedKey &&
-                    verifier.verify(expectedKey, serverIdentityInput(challenge, info.serverTime), signature)
-                if (genuine) info.asSuccess() else DomainError.ServerIdentityMismatch.asFailure()
+                val key = info.identity?.publicKey?.takeIf(pin::matches)
+                val signature = info.identity?.let { runCatching { Base64.getDecoder().decode(it.signature) }.getOrNull() }
+                if (key != null && signature != null && verifier.verify(key, serverIdentityInput(challenge, info.serverTime), signature)) {
+                    key.asSuccess()
+                } else {
+                    DomainError.ServerIdentityMismatch.asFailure()
+                }
             }
         }
     }
@@ -67,8 +69,9 @@ class PairWithServer(
         // The server decides; this only spares a trip for a code that is clearly stale, clocks allowing.
         if (clock.now().isAfter(invite.expiresAt.plus(CLOCK_TOLERANCE))) return DomainError.PairingInvalid.asFailure()
         var lastError: DomainError = DomainError.Network.Unreachable
+        val pin = ServerPin.Key(invite.serverKey)
         val serverUrl = invite.serverUrls.firstOrNull { url ->
-            when (val check = verifyServer(url, invite.serverKey)) {
+            when (val check = verifyServer(url, pin)) {
                 is Outcome.Success -> true
                 is Outcome.Failure -> {
                     lastError = check.error
@@ -78,7 +81,9 @@ class PairWithServer(
         } ?: return lastError.asFailure()
 
         return registerDevice(PairingTarget(invite, serverUrl)).map { result ->
-            trackerConfig.update { it.copy(serverUrl = serverUrl, serverKey = invite.serverKey, serverAddresses = invite.serverUrls) }
+            trackerConfig.update {
+                it.copy(serverUrl = serverUrl, serverKey = invite.serverKey, serverAddresses = invite.serverUrls, serverFingerprint = "")
+            }
             PairingResult(invite.serverName, serverUrl, result.approval)
         }
     }
@@ -95,7 +100,7 @@ class GetCurrentServer(private val trackerConfig: TrackerConfigRepository) {
     suspend operator fun invoke(): CurrentServer? {
         val config = trackerConfig.get()
         if (config.serverUrl.isBlank()) return null
-        return CurrentServer(config.serverUrl, config.serverKey.ifBlank { null }?.let(::keyFingerprint))
+        return CurrentServer(config.serverUrl, config.pinnedFingerprint)
     }
 }
 
@@ -118,25 +123,35 @@ class FailOverServerAddress(
 
     suspend operator fun invoke(): Boolean {
         val config = trackerConfig.get()
-        if (config.serverKey.isBlank()) return false
+        val pin = config.serverPin ?: return false
         val known = config.serverAddresses.filter { it != config.serverUrl }
-        known.firstOrNull { verifyServer(it, config.serverKey) is Outcome.Success }?.let { found ->
-            trackerConfig.update { it.copy(serverUrl = found) }
-            return true
+        known.firstOrNull { verifyServer(it, pin) is Outcome.Success }?.let { found ->
+            return switchTo(found, pin, remember = false)
         }
 
         val now = clock.now()
         if (lastDiscovery?.let { Duration.between(it, now) < discoveryInterval } == true) return false
         lastDiscovery = now
-        val hint = serverKeyHint(config.serverKey)
+        val hint = config.pinnedFingerprint?.replace("-", "")
         val found = discovery.discover(DISCOVERY_TIMEOUT)
             .filter { (it.keyHint == null || it.keyHint == hint) && it.url != config.serverUrl && it.url !in known }
             .map { it.url }
             .distinct()
-            .firstOrNull { verifyServer(it, config.serverKey) is Outcome.Success }
+            .firstOrNull { verifyServer(it, pin) is Outcome.Success }
             ?: return false
-        trackerConfig.update { it.copy(serverUrl = found, serverAddresses = (listOf(found) + it.serverAddresses).distinct().take(MAX_ADDRESSES)) }
-        return true
+        return switchTo(found, pin, remember = true)
+    }
+
+    /** Unless the settings moved on to another server while this looked, which then stays as saved. */
+    private suspend fun switchTo(url: String, pin: ServerPin, remember: Boolean): Boolean {
+        var switched = false
+        trackerConfig.update { current ->
+            if (current.serverPin != pin) return@update current
+            switched = true
+            val addresses = if (remember) (listOf(url) + current.serverAddresses).distinct().take(MAX_ADDRESSES) else current.serverAddresses
+            current.copy(serverUrl = url, serverAddresses = addresses)
+        }
+        return switched
     }
 
     companion object {

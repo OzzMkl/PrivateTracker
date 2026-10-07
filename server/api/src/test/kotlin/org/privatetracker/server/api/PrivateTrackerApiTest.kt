@@ -188,7 +188,7 @@ class PrivateTrackerApiTest {
 
     @Test
     fun `a registration with a valid pairing proof is approved at once, and the ticket serves only once`() = api {
-        val invite = CreatePairingInvite(tickets, serverKeys, config, clock)(listOf("http://localhost")).successValue()
+        val invite = CreatePairingInvite(tickets, serverKeys, config, clock)(listOf("https://localhost")).successValue()
         suspend fun pairedBody(device: DeviceId): String = ProtocolJson.encodeToString(
             RegisterDeviceRequest.serializer(),
             RegisterDeviceRequest(

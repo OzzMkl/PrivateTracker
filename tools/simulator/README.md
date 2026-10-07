@@ -6,6 +6,8 @@ Cada Tracker simulado usa los mismos casos de uso y el mismo cliente HTTP (OkHtt
 
 Desde la 0.2, el servidor solo acepta posiciones de dispositivos aprobados. Al arrancar, `run` imprime el nombre y la huella de cada Tracker simulado; apruébalos en la app, en **Dispositivos**. Hasta entonces, sus posiciones esperan en la cola, y los fallos `DEVICE_PENDING_APPROVAL` del inicio son normales.
 
+Desde la 0.4, el servidor solo habla HTTPS y los Trackers lo reconocen por su clave. `run` pide `--fingerprint` con la **huella del servidor** que muestra la pantalla **Servidor** de la app, igual que un teléfono configurado a mano. Con otra huella, la corrida no empieza (`SERVER_IDENTITY_MISMATCH`).
+
 - `run` envía posiciones y anota cada una en `ledger.csv`, junto con lo que respondió el servidor.
 - `verify` copia `server.db` del teléfono y comprueba que cada posición generada está ahí una sola vez, con la misma hora y coordenadas.
 
@@ -27,11 +29,12 @@ No ejecutes `installDist` ni `clean` mientras una corrida está en marcha, porqu
 3. Corre 10 minutos con fallas de red inyectadas:
 
    ```sh
-   simulator run --server http://127.0.0.1:8787 --interval 2s --duration 10m \
-       --drop 0.05 --lost-ack 0.1 --report-every 1m --out simulator-runs/emulador
+   simulator run --server https://127.0.0.1:8787 --fingerprint 3F9A-01BC-77D2-E410 \
+       --interval 2s --duration 10m --drop 0.05 --lost-ack 0.1 --report-every 1m \
+       --out simulator-runs/emulador
    ```
 
-   Aprueba los dispositivos «Simulador NN» en **Dispositivos**; las huellas deben coincidir con las de la consola. A mitad de la corrida, detén y vuelve a iniciar el servidor desde la app.
+   Cambia `3F9A-01BC-77D2-E410` por la huella de la pantalla **Servidor**. Aprueba los dispositivos «Simulador NN» en **Dispositivos**; las huellas deben coincidir con las de la consola. A mitad de la corrida, detén y vuelve a iniciar el servidor desde la app.
 4. Al terminar, detén el servidor en la app y verifica:
 
    ```sh
@@ -55,8 +58,10 @@ No ejecutes `installDist` ni `clean` mientras una corrida está en marcha, porqu
 Una instancia por teléfono. Pueden correr las tres a la vez en la misma PC, cada una con su propio `--out`:
 
 ```sh
-simulator run --server http://192.168.1.50:8787 --out simulator-runs/pixel7-24h
+simulator run --server https://192.168.1.50:8787 --fingerprint 3F9A-01BC-77D2-E410 --out simulator-runs/pixel7-24h
 ```
+
+Cada teléfono tiene su propia huella: cópiala de su pantalla **Servidor**.
 
 Los valores por defecto ya son los del criterio: 10 Trackers, una posición cada 60 s, 24 h. Equivalen a unas 0.17 peticiones por segundo y 14 400 posiciones.
 

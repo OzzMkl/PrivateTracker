@@ -2,11 +2,13 @@ plugins {
     id("privatetracker.jvm.library")
 }
 
-// Tracker-side HTTP client. Pure JVM: the engine (OkHttp on Android) is injected by the platform.
+// Tracker-side HTTP client. Pure JVM: OkHttp runs both on Android and in the simulator.
 dependencies {
     api(project(":core:domain"))
     api(libs.ktor.client.core)
     implementation(project(":core:protocol"))
+    // One TLS-pinned client per server key; see PinnedClients.
+    implementation(libs.ktor.client.okhttp)
 
     testImplementation(libs.ktor.client.mock)
     testImplementation(testFixtures(project(":core:domain")))

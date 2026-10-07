@@ -3,6 +3,7 @@ package org.privatetracker.core.domain.usecase.tracker
 import kotlinx.coroutines.test.runTest
 import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
+import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.domain.model.AppInfo
 import org.privatetracker.core.domain.model.DeviceApproval
@@ -14,6 +15,7 @@ import org.privatetracker.core.domain.model.RecordResult
 import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.SkipReason
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.TrackerRegistration
@@ -53,11 +55,12 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.TestTimeSource
 
-private const val SERVER = "http://192.168.1.10:8787"
+private const val SERVER = "https://192.168.1.10:8787"
+private val SERVER_FINGERPRINT = keyFingerprint(FakeServerKeys.SERVER_KEY)!!
 
 /** Wires the tracker use cases over in-memory storage and a scriptable server. */
 private class TrackerFixture(
-    config: TrackerConfig = TrackerConfig(serverUrl = SERVER, deviceName = "Pixel de Ana"),
+    config: TrackerConfig = TrackerConfig(serverUrl = SERVER, deviceName = "Pixel de Ana", serverKey = FakeServerKeys.SERVER_KEY),
 ) {
     val clock = FakeClock()
     val outbox = InMemoryOutboxRepository()
@@ -288,7 +291,7 @@ class UploadPendingLocationsTest {
     @Test
     fun `changing the server URL triggers a new registration`() = runTest {
         val fixture = TrackerFixture()
-        fixture.state.registration = TrackerRegistration("http://old-server:8787", 100, T0)
+        fixture.state.registration = TrackerRegistration("https://old-server:8787", 100, T0)
         fixture.enqueue(1)
 
         fixture.upload()
@@ -300,8 +303,8 @@ class UploadPendingLocationsTest {
 
 class PairingTest {
     private val serverKey = FakeServerKeys.SERVER_KEY
-    private val lan = "http://192.168.1.50:8787"
-    private val vpn = "http://100.101.102.103:8787"
+    private val lan = "https://192.168.1.50:8787"
+    private val vpn = "https://100.101.102.103:8787"
     private val invite = PairingInvite("Casa", listOf(lan, vpn), serverKey, "ticket-1", "AAAAAAAAAAAAAAAAAAAAAA", T0.plusSeconds(600))
 
     private fun unpairedFixture() = TrackerFixture(TrackerConfig(deviceName = "Pixel de Ana"))
@@ -337,7 +340,7 @@ class PairingTest {
 
     @Test
     fun `a failed pairing leaves the current one as it was`() = runTest {
-        val paired = TrackerConfig(serverUrl = "http://10.0.0.9:8787", deviceName = "Ana", serverKey = "b2xk", serverAddresses = listOf("http://10.0.0.9:8787"))
+        val paired = TrackerConfig(serverUrl = "https://10.0.0.9:8787", deviceName = "Ana", serverKey = "b2xk", serverAddresses = listOf("https://10.0.0.9:8787"))
         val fixture = TrackerFixture(paired)
         fixture.gateway.serverKey = serverKey
         fixture.gateway.registerResponses += Outcome.Failure(DomainError.PairingInvalid)
@@ -346,7 +349,7 @@ class PairingTest {
 
         assertEquals(paired, fixture.config.get())
         assertEquals(null, fixture.state.registration)
-        assertEquals(CurrentServer("http://10.0.0.9:8787", keyFingerprint("b2xk")), GetCurrentServer(fixture.config)())
+        assertEquals(CurrentServer("https://10.0.0.9:8787", keyFingerprint("b2xk")), GetCurrentServer(fixture.config)())
     }
 
     @Test
@@ -366,11 +369,11 @@ class PairingTest {
 
         fixture.upload()
 
-        assertEquals(listOf<String?>(serverKey), fixture.gateway.uploadKeys)
+        assertEquals(listOf<ServerPin>(ServerPin.Key(serverKey)), fixture.gateway.uploadPins)
     }
 
     @Test
-    fun `with a pinned key, a server that took over the address gets no registration and no locations`() = runTest {
+    fun `a server that took over the address fails the handshake and gets no registration and no locations`() = runTest {
         val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverKey = serverKey, serverAddresses = listOf(lan, vpn)))
         fixture.gateway.serverKey = fakePublicKey(DEVICE_B)
         fixture.enqueue(1)
@@ -399,9 +402,9 @@ class PairingTest {
         val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverKey = serverKey, serverAddresses = listOf(lan, vpn)))
         fixture.gateway.serverKey = serverKey
         fixture.gateway.unreachable += listOf(lan, vpn)
-        val other = "http://192.168.1.99:8787"
-        val impostor = "http://192.168.1.66:8787"
-        val moved = "http://192.168.1.77:8787"
+        val other = "https://192.168.1.99:8787"
+        val impostor = "https://192.168.1.66:8787"
+        val moved = "https://192.168.1.77:8787"
         // Another household's server announces another key: not even asked.
         fixture.discovery.found += DiscoveredServer(other, keyHint = "0000000000000000")
         // Announces our key's hint but cannot prove the key.
@@ -414,6 +417,22 @@ class PairingTest {
         assertEquals(moved, fixture.config.get().serverUrl)
         assertEquals(listOf(moved, lan, vpn), fixture.config.get().serverAddresses)
         assertTrue(fixture.gateway.healthCalls.none { it.first == other })
+    }
+
+    @Test
+    fun `a failover never overwrites a server saved while it was looking`() = runTest {
+        val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverKey = serverKey, serverAddresses = listOf(lan)))
+        fixture.gateway.unreachable += lan
+        val moved = "https://192.168.1.77:8787"
+        fixture.discovery.found += DiscoveredServer(moved, serverKeyHint(serverKey))
+        // The user saves another server while discovery listens.
+        fixture.discovery.onDiscover = {
+            fixture.config.update { it.copy(serverUrl = "https://10.0.0.5:8787", serverKey = "", serverFingerprint = "0000-1111-2222-3333") }
+        }
+
+        assertFalse(fixture.failOver())
+
+        assertEquals("https://10.0.0.5:8787", fixture.config.get().serverUrl)
     }
 
     @Test
@@ -430,18 +449,62 @@ class PairingTest {
     }
 
     @Test
-    fun `typing another server's URL drops the pinned key, choosing one of its addresses keeps it`() = runTest {
+    fun `the fingerprint says which server it is, not the address`() = runTest {
         val repository = InMemoryTrackerConfigRepository(
             TrackerConfig(serverUrl = lan, deviceName = "Ana", serverKey = serverKey, serverAddresses = listOf(lan, vpn)),
         )
         val update = UpdateTrackerConfig(repository)
+        val form = repository.get().copy(serverFingerprint = assertNotNull(repository.get().pinnedFingerprint))
 
-        update(repository.get().copy(serverUrl = vpn)).successValue()
+        // The same server at an address typed by hand: still trusted by its whole key.
+        update(form.copy(serverUrl = "https://192.168.1.99:8787")).successValue()
         assertEquals(serverKey, repository.get().serverKey)
+        assertEquals(listOf(lan, vpn), repository.get().serverAddresses)
 
-        update(repository.get().copy(serverUrl = "http://192.168.1.99:8787")).successValue()
+        // Another fingerprint is another server, trusted by that fingerprint until the first contact.
+        update(form.copy(serverFingerprint = "0000-1111-2222-3333")).successValue()
         assertEquals("", repository.get().serverKey)
         assertEquals(emptyList(), repository.get().serverAddresses)
+        assertEquals(ServerPin.Fingerprint("0000-1111-2222-3333"), repository.get().serverPin)
+    }
+
+    @Test
+    fun `a server typed in by hand is trusted by its fingerprint until registering gives its whole key`() = runTest {
+        val fingerprint = assertNotNull(keyFingerprint(serverKey))
+        val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverFingerprint = fingerprint))
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.Completed(sent = 1, rejected = 0, hasMore = false), fixture.upload())
+
+        val config = fixture.config.get()
+        assertEquals(serverKey, config.serverKey)
+        assertEquals("", config.serverFingerprint)
+        // Health by the fingerprint; registration and the batch by the key the server just proved.
+        assertEquals(listOf(ServerPin.Fingerprint(fingerprint), ServerPin.Key(serverKey), ServerPin.Key(serverKey)), fixture.gateway.pins)
+        assertEquals(listOf<ServerPin>(ServerPin.Key(serverKey)), fixture.gateway.uploadPins)
+    }
+
+    @Test
+    fun `a server whose key does not match the typed fingerprint is told nothing`() = runTest {
+        val fingerprint = assertNotNull(keyFingerprint(fakePublicKey(DEVICE_B)))
+        val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana", serverFingerprint = fingerprint))
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.RetryLater(DomainError.ServerIdentityMismatch), fixture.upload())
+
+        assertTrue(fixture.gateway.registrations.isEmpty())
+        assertTrue(fixture.gateway.uploads.isEmpty())
+        assertEquals("", fixture.config.get().serverKey)
+    }
+
+    @Test
+    fun `with nothing to trust the server by, nothing is sent`() = runTest {
+        val fixture = TrackerFixture(TrackerConfig(serverUrl = lan, deviceName = "Ana"))
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.Blocked(DomainError.ServerNotTrusted), fixture.upload())
+        assertEquals(DomainError.ServerNotTrusted, fixture.register().failureError())
+        assertTrue(fixture.gateway.pins.isEmpty())
     }
 }
 
@@ -451,10 +514,13 @@ class TrackerSettingsTest {
         val repository = InMemoryTrackerConfigRepository()
         val update = UpdateTrackerConfig(repository)
 
-        val saved = update(TrackerConfig(serverUrl = " http://192.168.1.10:8787/ ", deviceName = " Ana ")).successValue()
+        val saved = update(
+            TrackerConfig(serverUrl = " 192.168.1.10:8787/ ", deviceName = " Ana ", serverFingerprint = " 3f9a 01bc-77d2:e410 "),
+        ).successValue()
 
-        assertEquals("http://192.168.1.10:8787", saved.serverUrl)
+        assertEquals("https://192.168.1.10:8787", saved.serverUrl)
         assertEquals("Ana", saved.deviceName)
+        assertEquals("3F9A-01BC-77D2-E410", saved.serverFingerprint)
         assertEquals(saved, repository.get())
     }
 
@@ -464,7 +530,7 @@ class TrackerSettingsTest {
 
         val error = assertIs<DomainError.Validation>(UpdateTrackerConfig(repository)(TrackerConfig(intervalSeconds = 5)).failureError())
 
-        assertEquals(listOf("serverUrl", "deviceName", "intervalSeconds"), error.violations.map { it.field })
+        assertEquals(listOf("serverUrl", "serverFingerprint", "deviceName", "intervalSeconds"), error.violations.map { it.field })
         assertEquals(TrackerConfig(), repository.get())
     }
 
@@ -474,7 +540,7 @@ class TrackerSettingsTest {
         val gateway = FakeServerGateway(clock)
         gateway.healthResponses += Outcome.Success(ServerInfo("Casa", "0.1.0", 1, T0.plusSeconds(90)))
 
-        val check = TestServerConnection(gateway, clock, TestTimeSource())(SERVER).successValue()
+        val check = TestServerConnection(gateway, clock, TestTimeSource())(SERVER, SERVER_FINGERPRINT).successValue()
 
         assertTrue(check.compatible)
         assertEquals(Duration.ZERO, check.latency)
@@ -497,9 +563,25 @@ class TrackerSettingsTest {
     }
 
     @Test
-    fun `testing a malformed URL fails without a request`() = runTest {
+    fun `testing a connection trusts only the server with the typed fingerprint`() = runTest {
         val gateway = FakeServerGateway()
+        val test = TestServerConnection(gateway, FakeClock())
 
-        assertIs<DomainError.Validation>(TestServerConnection(gateway, FakeClock())("not a url").failureError())
+        test(SERVER, SERVER_FINGERPRINT.lowercase().replace("-", " ")).successValue()
+        assertEquals(listOf<ServerPin>(ServerPin.Fingerprint(SERVER_FINGERPRINT)), gateway.pins)
+
+        assertEquals(DomainError.ServerIdentityMismatch, test(SERVER, "0000-1111-2222-3333").failureError())
+    }
+
+    @Test
+    fun `testing a malformed URL or fingerprint fails without a request`() = runTest {
+        val gateway = FakeServerGateway()
+        val test = TestServerConnection(gateway, FakeClock())
+
+        val error = assertIs<DomainError.Validation>(test("not a url", "3F9A").failureError())
+        assertEquals(listOf("serverUrl", "serverFingerprint"), error.violations.map { it.field })
+        val plain = assertIs<DomainError.Validation>(test("http://192.168.1.10:8787", SERVER_FINGERPRINT).failureError())
+        assertEquals(FieldViolation.HTTPS_REQUIRED, plain.violations.single().rule)
+        assertTrue(gateway.pins.isEmpty())
     }
 }

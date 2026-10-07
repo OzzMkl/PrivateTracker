@@ -159,6 +159,7 @@ internal fun TrackerConfigData.toDomain() = TrackerConfig(
     trackingEnabled = trackingEnabled,
     serverKey = serverKey,
     serverAddresses = serverAddresses,
+    serverFingerprint = serverFingerprint,
 )
 
 internal fun TrackerConfig.toData() = TrackerConfigData(
@@ -174,6 +175,7 @@ internal fun TrackerConfig.toData() = TrackerConfigData(
     trackingEnabled = trackingEnabled,
     serverKey = serverKey,
     serverAddresses = serverAddresses,
+    serverFingerprint = serverFingerprint,
 )
 
 internal fun ServerConfigData.toDomain() = ServerConfig(

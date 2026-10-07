@@ -6,9 +6,12 @@ import org.privatetracker.core.domain.model.AppPermission
 import org.privatetracker.core.domain.model.PermissionReport
 import org.privatetracker.core.domain.model.PermissionStatus
 import org.privatetracker.core.domain.model.Requirement
+import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.network.loopbackUrl
+import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.PermissionChecker
 import org.privatetracker.core.domain.port.ServerController
+import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.repository.AppModeRepository
 import org.privatetracker.core.domain.repository.ServerConfigRepository
 import org.privatetracker.core.domain.repository.TrackerConfigRepository
@@ -24,6 +27,7 @@ class SetAppMode(
     private val appModes: AppModeRepository,
     private val trackerConfig: TrackerConfigRepository,
     private val serverConfig: ServerConfigRepository,
+    private val trustOwnServer: TrustOwnServer,
     private val stopTracking: StopTracking,
     private val serverController: ServerController,
 ) {
@@ -33,9 +37,34 @@ class SetAppMode(
             // The tracker reports to the server on its own phone unless the user chose another.
             val port = serverConfig.get().port
             trackerConfig.update { if (it.serverUrl.isBlank()) it.copy(serverUrl = loopbackUrl(port)) else it }
+            trustOwnServer()
         }
         if (!mode.tracks) stopTracking()
         if (!mode.serves) serverController.stop()
+    }
+}
+
+/**
+ * A tracker that reports to the server on its own phone, with nothing pinned yet, trusts that server's
+ * key, read from the Keystore rather than over the network: another app holding the port cannot show
+ * it. Covers choosing both roles and a phone updated from before 0.4, whose loopback address had no
+ * key. Without a working key the server cannot serve TLS either; the settings then ask for a fingerprint.
+ */
+class TrustOwnServer(
+    private val trackerConfig: TrackerConfigRepository,
+    private val serverConfig: ServerConfigRepository,
+    private val serverKeys: ServerKeys,
+) {
+    suspend operator fun invoke() {
+        val ownUrl = loopbackUrl(serverConfig.get().port)
+        fun needsKey(config: TrackerConfig) = config.serverUrl == ownUrl && config.serverPin == null
+        if (!needsKey(trackerConfig.get())) return
+        val ownKey = try {
+            serverKeys.publicKey()
+        } catch (e: DeviceKeyException) {
+            return
+        }
+        trackerConfig.update { if (needsKey(it)) it.copy(serverKey = ownKey, serverAddresses = emptyList()) else it }
     }
 }
 

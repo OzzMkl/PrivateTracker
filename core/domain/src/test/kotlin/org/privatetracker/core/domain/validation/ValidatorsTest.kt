@@ -54,7 +54,7 @@ class LocationValidatorTest {
 }
 
 class TrackerConfigValidatorTest {
-    private val valid = TrackerConfig(serverUrl = "http://192.168.1.10:8787", deviceName = "Pixel de Ana")
+    private val valid = TrackerConfig(serverUrl = "https://192.168.1.10:8787", deviceName = "Pixel de Ana", serverFingerprint = "3F9A-01BC-77D2-E410")
 
     @Test
     fun `a complete configuration is valid`() {
@@ -64,15 +64,39 @@ class TrackerConfigValidatorTest {
     @Test
     fun `defaults are incomplete until server and name are set`() {
         val fields = TrackerConfigValidator.validate(TrackerConfig()).associate { it.field to it.rule }
-        assertEquals(mapOf("serverUrl" to FieldViolation.REQUIRED, "deviceName" to FieldViolation.REQUIRED), fields)
+        assertEquals(
+            mapOf(
+                "serverUrl" to FieldViolation.REQUIRED,
+                "serverFingerprint" to FieldViolation.REQUIRED,
+                "deviceName" to FieldViolation.REQUIRED,
+            ),
+            fields,
+        )
     }
 
     @Test
-    fun `accepts base URLs only`() {
-        listOf("http://192.168.1.10:8787", "https://tracker.example.org", "http://[fe80::1]:8787/", "http://localhost:8787")
+    fun `accepts https base URLs only`() {
+        listOf("https://192.168.1.10:8787", "https://tracker.example.org", "https://[fe80::1]:8787/", "https://localhost:8787")
             .forEach { assertNull(TrackerConfigValidator.validateServerUrl(it), it) }
-        listOf("ftp://host", "192.168.1.10:8787", "http://host:8787/api", "http://host?x=1", "http://user@host", "http://")
+        listOf("ftp://host", "192.168.1.10:8787", "https://host:8787/api", "https://host?x=1", "https://user@host", "https://")
             .forEach { assertEquals(FieldViolation.INVALID_FORMAT, TrackerConfigValidator.validateServerUrl(it)?.rule, it) }
+        assertEquals(FieldViolation.HTTPS_REQUIRED, TrackerConfigValidator.validateServerUrl("http://192.168.1.10:8787")?.rule)
+    }
+
+    @Test
+    fun `a URL typed without a scheme gets https`() {
+        assertEquals("https://192.168.1.10:8787", TrackerConfigValidator.normalizeServerUrl(" 192.168.1.10:8787/ "))
+        assertEquals("http://192.168.1.10:8787", TrackerConfigValidator.normalizeServerUrl("http://192.168.1.10:8787"))
+    }
+
+    @Test
+    fun `the server is trusted by its key or by a well-formed fingerprint`() {
+        val unpinned = valid.copy(serverFingerprint = "")
+        assertEquals(listOf(FieldViolation("serverFingerprint", FieldViolation.REQUIRED)), TrackerConfigValidator.validate(unpinned))
+        assertEquals(emptyList(), TrackerConfigValidator.validate(unpinned.copy(serverKey = "a2V5")))
+        listOf("3F9A-01BC-77D2", "3f9a-01bc-77d2-e410", "3F9A-01BC-77D2-E41G").forEach {
+            assertEquals(FieldViolation.INVALID_FORMAT, TrackerConfigValidator.validateServerFingerprint(it)?.rule, it)
+        }
     }
 
     @Test

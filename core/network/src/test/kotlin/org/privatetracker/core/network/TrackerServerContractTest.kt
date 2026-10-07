@@ -87,22 +87,25 @@ class TrackerServerContractTest {
     }
 
     @Test
-    fun `fixes recorded on the tracker wait for approval, then end up stored on the server exactly once`() = testApplication {
+    fun `a server typed in by hand with its fingerprint gets the fixes once its owner approves the tracker`() = testApplication {
         application { privateTrackerApi(serverDependencies()) }
         val keys = InMemoryDeviceKeys()
-        val gateway = KtorServerGateway(createClient { expectSuccess = false }, keys, clock)
+        // The test client has no TLS; the pin still decides whether health proves the right key.
+        val client = createClient { expectSuccess = false }
+        val gateway = KtorServerGateway({ client }, keys, clock)
+        val fingerprint = assertNotNull(keyFingerprint(serverKeys.publicKey()))
         val ids = SequentialIdGenerator()
         val outbox = InMemoryOutboxRepository()
         val state = InMemoryTrackerStateRepository()
         val config = InMemoryTrackerConfigRepository(
-            TrackerConfig(serverUrl = "http://localhost", deviceName = "Pixel de Ana", batchSize = 2),
+            TrackerConfig(serverUrl = "https://localhost", deviceName = "Pixel de Ana", batchSize = 2, serverFingerprint = fingerprint),
         )
         val identity = GetOrCreateDeviceIdentity(InMemoryIdentityRepository(DEVICE_A), ids)
         val record = RecordLocation(outbox, state, config, identity, FixedBattery(), LocationValidator(clock), ids)
         val register = RegisterDevice(gateway, config, state, identity, keys, VerifyServerIdentity(gateway, EcdsaP256), AppInfo(Platform.ANDROID, "0.1.0"), clock)
         val upload = UploadPendingLocations(outbox, gateway, config, state, register, identity, clock)
 
-        assertTrue(TestServerConnection(gateway, clock)("http://localhost").successValue().compatible)
+        assertTrue(TestServerConnection(gateway, clock)("https://localhost", fingerprint).successValue().compatible)
         repeat(5) { assertIs<RecordResult.Recorded>(record(aFix(recordedAt = T0.plusSeconds(it * 10L)))) }
 
         // New on this server: it registers, then waits with everything still queued.
@@ -111,6 +114,8 @@ class TrackerServerContractTest {
         val pending = serverStore.get(DEVICE_A)!!
         assertEquals(DeviceApproval.PENDING, pending.approval)
         assertEquals(keyFingerprint(keys.publicKey(DEVICE_A)), keyFingerprint(pending.publicKey!!))
+        // Registering proved the server's key against the fingerprint, and the tracker kept the whole key.
+        assertEquals(serverKeys.publicKey(), config.get().serverKey)
 
         // The owner compares fingerprints and approves.
         serverStore.update(pending.copy(approval = DeviceApproval.APPROVED))
@@ -127,7 +132,8 @@ class TrackerServerContractTest {
     fun `scanning the server's QR pairs the tracker with no typing and no manual approval`() = testApplication {
         application { privateTrackerApi(serverDependencies()) }
         val keys = InMemoryDeviceKeys()
-        val gateway = KtorServerGateway(createClient { expectSuccess = false }, keys, clock)
+        val client = createClient { expectSuccess = false }
+        val gateway = KtorServerGateway({ client }, keys, clock)
         val ids = SequentialIdGenerator()
         val outbox = InMemoryOutboxRepository()
         val state = InMemoryTrackerStateRepository()
@@ -139,12 +145,12 @@ class TrackerServerContractTest {
         val record = RecordLocation(outbox, state, config, identity, FixedBattery(), LocationValidator(clock), ids)
 
         // The server screen shows a QR; the tracker reads its link. The first address leads nowhere.
-        val invite = CreatePairingInvite(tickets, serverKeys, serverConfig, clock)(listOf("http://192.0.2.1:8787", "http://localhost"))
+        val invite = CreatePairingInvite(tickets, serverKeys, serverConfig, clock)(listOf("https://192.0.2.1:8787", "https://localhost"))
             .successValue()
         val scanned = assertNotNull(PairingUri.parse(PairingUri.format(invite)))
         val result = PairWithServer(verifyServer, config, register, clock)(scanned).successValue()
 
-        assertEquals(PairingResult("PrivateTracker Server", "http://localhost", DeviceApproval.APPROVED), result)
+        assertEquals(PairingResult("PrivateTracker Server", "https://localhost", DeviceApproval.APPROVED), result)
         assertEquals(serverKeys.publicKey(), config.get().serverKey)
         repeat(3) { record(aFix(recordedAt = T0.plusSeconds(it * 10L))) }
         assertEquals(UploadResult.Completed(sent = 3, rejected = 0, hasMore = false), upload())

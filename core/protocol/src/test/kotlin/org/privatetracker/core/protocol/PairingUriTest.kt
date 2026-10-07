@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 class PairingUriTest {
     private suspend fun invite() = PairingInvite(
         serverName = "Casa de Ana & Luis + 50% = ñ",
-        serverUrls = listOf("http://192.168.1.50:8787", "http://100.101.102.103:8787"),
+        serverUrls = listOf("https://192.168.1.50:8787", "https://100.101.102.103:8787"),
         serverKey = InMemoryServerKeys().publicKey(),
         ticketId = "tK3_x-9aBcDe",
         secret = "AAECAwQFBgcICQoLDA0ODw",
@@ -50,6 +50,8 @@ class PairingUriTest {
             link.replace(Regex("secret=[^&]*"), "secret=AAAA"),
             link.replace(Regex("&url=[^&]*"), ""),
             link.replace(Regex("url=[^&]*"), "url=ftp%3A%2F%2Fhost"),
+            // A server from before 0.4, with plain HTTP addresses only.
+            link.replace("https%3A", "http%3A"),
             link.replace(Regex("expires=[^&]*"), "expires=soon"),
             link.replace(Regex("ticket=[^&]*"), "ticket=has%20space"),
             "not a link at all",

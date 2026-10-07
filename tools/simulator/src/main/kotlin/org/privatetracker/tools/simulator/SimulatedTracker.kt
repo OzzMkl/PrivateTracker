@@ -60,6 +60,7 @@ class SimulatedTracker(
     private val config = MemoryTrackerConfig(
         TrackerConfig(
             serverUrl = options.serverUrl,
+            serverFingerprint = options.serverFingerprint,
             deviceName = name,
             intervalSeconds = options.interval.seconds.toInt().coerceAtLeast(1),
             batchSize = options.batchSize,

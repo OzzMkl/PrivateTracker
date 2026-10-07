@@ -78,6 +78,14 @@ sealed interface DomainError {
         override val code: String = "SERVER_IDENTITY_MISMATCH"
     }
 
+    /**
+     * The tracker has a server address but nothing to trust it by: neither the key from its QR code
+     * nor the fingerprint from its screen. From 0.4 it then sends nothing at all.
+     */
+    data object ServerNotTrusted : DomainError {
+        override val code: String = "SERVER_NOT_TRUSTED"
+    }
+
     /** The server could not attribute the request to the device it claims to come from. */
     data class AuthenticationFailed(val reason: AuthFailure) : DomainError {
         override val code: String get() = reason.code
@@ -113,6 +121,9 @@ data class FieldViolation(val field: String, val rule: String) {
         const val OUT_OF_RANGE = "out_of_range"
         const val INVALID_FORMAT = "invalid_format"
         const val TOO_LONG = "too_long"
+
+        /** A plain `http://` address: from 0.4 servers only speak TLS. */
+        const val HTTPS_REQUIRED = "https_required"
     }
 }
 

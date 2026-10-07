@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Button
@@ -19,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -26,6 +28,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import org.privatetracker.core.designsystem.R as DesignR
 import org.privatetracker.core.designsystem.component.EmptyState
 import org.privatetracker.core.designsystem.component.LoadingBox
 import org.privatetracker.core.designsystem.component.ScreenScaffold
@@ -40,8 +44,6 @@ import org.privatetracker.feature.devices.R
 import org.privatetracker.feature.devices.fingerprint
 import org.privatetracker.feature.devices.label
 import org.privatetracker.feature.devices.tone
-import java.time.Instant
-import org.privatetracker.core.designsystem.R as DesignR
 
 @Composable
 fun DeviceListRoute(onOpenDevice: (DeviceId) -> Unit, viewModel: DeviceListViewModel = hiltViewModel()) {
@@ -78,7 +80,10 @@ private fun DeviceList(
 ) {
     val now = rememberNow()
     val (pending, others) = devices.partition { it.device.awaitsApproval }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
+    val listState = rememberLazyListState()
+    // The list keeps its first visible item in place, so a request arriving above it would stay out of sight.
+    LaunchedEffect(pending.size) { if (pending.isNotEmpty()) listState.scrollToItem(0) }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = padding) {
         if (pending.isNotEmpty()) {
             item(key = "pending-header") {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {

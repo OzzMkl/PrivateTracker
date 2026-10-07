@@ -1,6 +1,7 @@
 package org.privatetracker.core.domain.validation
 
 import org.privatetracker.core.common.result.FieldViolation
+import org.privatetracker.core.common.result.FieldViolation.Companion.HTTPS_REQUIRED
 import org.privatetracker.core.common.result.FieldViolation.Companion.INVALID_FORMAT
 import org.privatetracker.core.common.result.FieldViolation.Companion.OUT_OF_RANGE
 import org.privatetracker.core.common.result.FieldViolation.Companion.REQUIRED
@@ -8,6 +9,7 @@ import org.privatetracker.core.common.result.FieldViolation.Companion.TOO_LONG
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.TrackerConfig
+import org.privatetracker.core.domain.model.isValidFingerprint
 import java.net.URI
 
 /** Hard limit of positions per request, shared by tracker and server. */
@@ -22,6 +24,8 @@ object TrackerConfigValidator {
 
     fun validate(config: TrackerConfig): List<FieldViolation> = buildList {
         validateServerUrl(config.serverUrl)?.let(::add)
+        // A key pinned from a QR code or learned already is all the trust needed.
+        if (config.serverKey.isBlank()) validateServerFingerprint(config.serverFingerprint)?.let(::add)
         validateDeviceName("deviceName", config.deviceName)?.let(::add)
         if (config.intervalSeconds !in INTERVAL_SECONDS) add(FieldViolation("intervalSeconds", OUT_OF_RANGE))
         if (config.minDistanceM !in MIN_DISTANCE_M) add(FieldViolation("minDistanceM", OUT_OF_RANGE))
@@ -30,13 +34,14 @@ object TrackerConfigValidator {
         if (config.maxQueueSize !in MAX_QUEUE_SIZE) add(FieldViolation("maxQueueSize", OUT_OF_RANGE))
     }
 
-    /** Accepts `http(s)://host[:port]` with an optional trailing slash and nothing else. */
+    /** Accepts `https://host[:port]` with an optional trailing slash and nothing else: from 0.4 servers only speak TLS. */
     fun validateServerUrl(raw: String): FieldViolation? {
         if (raw.isBlank()) return FieldViolation("serverUrl", REQUIRED)
         val invalid = FieldViolation("serverUrl", INVALID_FORMAT)
         val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return invalid
         val scheme = uri.scheme?.lowercase()
-        if (scheme != "http" && scheme != "https") return invalid
+        if (scheme == "http") return FieldViolation("serverUrl", HTTPS_REQUIRED)
+        if (scheme != "https") return invalid
         if (uri.host.isNullOrBlank()) return invalid
         if (uri.port != -1 && uri.port !in 1..65535) return invalid
         val path = uri.rawPath.orEmpty()
@@ -45,7 +50,18 @@ object TrackerConfigValidator {
         return null
     }
 
-    fun normalizeServerUrl(raw: String): String = raw.trim().removeSuffix("/")
+    /** Trims, drops a trailing slash and adds `https://` when no scheme was typed. */
+    fun normalizeServerUrl(raw: String): String {
+        val trimmed = raw.trim().removeSuffix("/")
+        return if (trimmed.isEmpty() || "://" in trimmed) trimmed else "https://$trimmed"
+    }
+
+    /** Expects the form [org.privatetracker.core.domain.model.normalizeFingerprint] gives. */
+    fun validateServerFingerprint(value: String): FieldViolation? = when {
+        value.isBlank() -> FieldViolation("serverFingerprint", REQUIRED)
+        !isValidFingerprint(value) -> FieldViolation("serverFingerprint", INVALID_FORMAT)
+        else -> null
+    }
 }
 
 object ServerConfigValidator {

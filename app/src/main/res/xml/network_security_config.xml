@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Protocol v1 runs over plain HTTP on a LAN or VPN, and servers have arbitrary IP addresses,
-    which domain-config cannot express. Cleartext is therefore allowed for every host until
-    HTTPS arrives in 0.4, when this base-config goes back to the platform default.
+    From 0.4 the protocol runs over TLS only, so no host may be reached in the clear. Servers have
+    self-signed certificates that trackers trust by the pinned key alone (core:network's
+    PinnedKeyTrustManager); the system anchors here serve everything else, such as map tiles.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

@@ -31,6 +31,7 @@ fun DomainError.message(): String = when (this) {
     DomainError.DeviceKeyUnavailable -> stringResource(R.string.error_device_key)
     DomainError.PairingInvalid -> stringResource(R.string.error_pairing_invalid)
     DomainError.ServerIdentityMismatch -> stringResource(R.string.error_server_identity)
+    DomainError.ServerNotTrusted -> stringResource(R.string.error_server_not_trusted)
     is DomainError.AuthenticationFailed -> stringResource(
         when (reason) {
             AuthFailure.EXPIRED -> R.string.error_signature_expired
@@ -63,6 +64,7 @@ fun FieldViolation.message(): String = when (rule) {
     FieldViolation.OUT_OF_RANGE -> stringResource(R.string.violation_out_of_range)
     FieldViolation.INVALID_FORMAT -> stringResource(R.string.violation_invalid_format)
     FieldViolation.TOO_LONG -> stringResource(R.string.violation_too_long)
+    FieldViolation.HTTPS_REQUIRED -> stringResource(R.string.violation_https_required)
     else -> rule
 }
 

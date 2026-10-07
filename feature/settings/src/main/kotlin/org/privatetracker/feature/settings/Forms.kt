@@ -9,6 +9,8 @@ import org.privatetracker.core.domain.model.TrackerConfig
 
 data class TrackerForm(
     val serverUrl: String,
+    /** The fingerprint the server screen shows; for a server paired by QR, its pinned key's. */
+    val serverFingerprint: String,
     val deviceName: String,
     val intervalSeconds: String,
     val minDistanceM: String,
@@ -25,6 +27,7 @@ data class TrackerForm(
         val numbers = NumberReader()
         val config = base.copy(
             serverUrl = serverUrl,
+            serverFingerprint = serverFingerprint,
             deviceName = deviceName,
             intervalSeconds = numbers.int("intervalSeconds", intervalSeconds),
             minDistanceM = numbers.float("minDistanceM", minDistanceM),
@@ -40,6 +43,7 @@ data class TrackerForm(
     companion object {
         fun from(config: TrackerConfig) = TrackerForm(
             serverUrl = config.serverUrl,
+            serverFingerprint = config.pinnedFingerprint.orEmpty(),
             deviceName = config.deviceName,
             intervalSeconds = config.intervalSeconds.toString(),
             minDistanceM = config.minDistanceM.plain(),

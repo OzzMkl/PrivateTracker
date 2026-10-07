@@ -17,11 +17,31 @@ data class TrackerConfig(
     val startOnBoot: Boolean = false,
     /** Desired state: when true, tracking is restored after the process dies or the phone reboots. */
     val trackingEnabled: Boolean = false,
-    /** The server's key, pinned when pairing with its QR code; blank for a server typed in by hand. */
+    /**
+     * The server's key: pinned when pairing with its QR code, or learned on the first contact with a
+     * server typed in by hand, once it proved to hold the key of [serverFingerprint].
+     */
     val serverKey: String = "",
     /** Every address the QR code listed, [serverUrl] among them, to try when the current one stops answering. */
     val serverAddresses: List<String> = emptyList(),
-)
+    /**
+     * The fingerprint the server's screen shows, typed in by hand with its address. The tracker trusts
+     * the server by it until it has the whole [serverKey]; blank from then on.
+     */
+    val serverFingerprint: String = "",
+) {
+    /** What this tracker trusts its server by; with nothing, it talks to no server at all. */
+    val serverPin: ServerPin?
+        get() = when {
+            serverKey.isNotBlank() -> ServerPin.Key(serverKey)
+            serverFingerprint.isNotBlank() -> ServerPin.Fingerprint(serverFingerprint)
+            else -> null
+        }
+
+    /** The fingerprint of the trusted server, however it was pinned, to show and to edit. */
+    val pinnedFingerprint: String?
+        get() = serverKey.ifBlank { null }?.let(::keyFingerprint) ?: serverFingerprint.ifBlank { null }
+}
 
 /** Settings of the Server mode. Ranges are enforced by [org.privatetracker.core.domain.validation.ServerConfigValidator]. */
 data class ServerConfig(

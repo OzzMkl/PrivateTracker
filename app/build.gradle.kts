@@ -73,7 +73,6 @@ dependencies {
     implementation(project(":feature:devices"))
     implementation(project(":feature:settings"))
 
-    implementation(libs.ktor.client.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)

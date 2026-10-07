@@ -31,6 +31,8 @@ data class RetryPolicy(
 
 data class SimulationOptions(
     val serverUrl: String,
+    /** The fingerprint the server screen shows: simulated trackers trust the server by it, as phones set up by hand do. */
+    val serverFingerprint: String,
     val trackers: Int = 10,
     val interval: Duration = Duration.ofSeconds(60),
     val duration: Duration = Duration.ofHours(24),

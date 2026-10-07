@@ -46,7 +46,7 @@
     <string name="server_kind_loopback">Este teléfono</string>
     <string name="server_copy">Copiar</string>
     <string name="server_copied">URL copiada</string>
-    <string name="server_security_notice">Cada teléfono firma lo que envía y solo entra si lo emparejas o lo apruebas, pero las ubicaciones aún viajan sin cifrar: usa el servidor solo en tu Wi-Fi o en una VPN de confianza.</string>
+    <string name="server_security_notice">Las ubicaciones viajan cifradas y cada teléfono comprueba que el servidor tenga esta huella. Solo entran los teléfonos que emparejas o apruebas.</string>
     <string name="server_power_hint">Para que el servidor no se detenga, mantén este teléfono conectado a la corriente.</string>
 
     <!-- Notification. -->

@@ -54,7 +54,7 @@ fun serverAddresses(addresses: List<NetworkAddress>, port: Int, bindAddress: Str
     val listening = if (bindAddress == ANY_ADDRESS || bindAddress == "::") addresses else addresses.filter { it.host == bindAddress }
     return listening
         .filter { ipv4Octets(it.host) != null }
-        .map { ServerAddress("http://${it.host}:$port", classify(it)) }
+        .map { ServerAddress("https://${it.host}:$port", classify(it)) }
         .distinctBy { it.url }
         .sortedBy { it.kind.ordinal }
 }
@@ -62,4 +62,4 @@ fun serverAddresses(addresses: List<NetworkAddress>, port: Int, bindAddress: Str
 private const val ANY_ADDRESS = "0.0.0.0"
 
 /** The URL a tracker on the server's own phone uses. */
-fun loopbackUrl(port: Int): String = "http://127.0.0.1:$port"
+fun loopbackUrl(port: Int): String = "https://127.0.0.1:$port"

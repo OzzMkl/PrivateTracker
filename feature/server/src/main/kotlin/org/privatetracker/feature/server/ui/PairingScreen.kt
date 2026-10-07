@@ -95,7 +95,8 @@ private fun InviteCard(state: PairingUiState, onRenew: () -> Unit) {
                 .aspectRatio(1f),
         )
         Text(
-            stringResource(R.string.server_pairing_expires_in, left.toMinutes(), left.toSecondsPart()),
+            // Not toSecondsPart(): Android has it only from API 31.
+            stringResource(R.string.server_pairing_expires_in, left.toMinutes(), left.seconds % 60),
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),

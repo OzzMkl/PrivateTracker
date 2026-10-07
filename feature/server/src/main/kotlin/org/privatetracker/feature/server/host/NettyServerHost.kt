@@ -2,8 +2,6 @@ package org.privatetracker.feature.server.host
 
 import android.util.Log
 import io.ktor.server.engine.EmbeddedServer
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,8 +10,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.domain.model.ServerRunState
+import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.usecase.server.CloseAllSessions
 import org.privatetracker.core.domain.usecase.server.CloseInactiveSessions
+import org.privatetracker.core.security.KeystoreServerKeys
 import org.privatetracker.feature.server.service.ServiceServerController
 import org.privatetracker.server.api.ServerDependencies
 import org.privatetracker.server.api.privateTrackerApi
@@ -22,7 +22,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Runs the engine-agnostic [privateTrackerApi] on Netty.
+ * Runs the engine-agnostic [privateTrackerApi] on Netty, over TLS with the server's own key; see [tlsServer].
  *
  * Call [start] and [stop] from a coroutine launched on [scope]: they block while Netty binds or
  * drains. Do not wrap Ktor's start() in withContext: on Android (Ktor 3.6, coroutines 1.11) start()
@@ -31,6 +31,7 @@ import javax.inject.Singleton
 @Singleton
 class NettyServerHost @Inject constructor(
     private val dependencies: ServerDependencies,
+    private val serverKeys: KeystoreServerKeys,
     private val controller: ServiceServerController,
     private val closeInactiveSessions: CloseInactiveSessions,
     private val closeAllSessions: CloseAllSessions,
@@ -50,8 +51,16 @@ class NettyServerHost @Inject constructor(
         controller.update(ServerRunState.Starting)
         // Sessions a crash left open end at their last activity, not now.
         closeInactiveSessions()
+        // Without its key the server has no TLS, and it never serves in the clear instead.
+        val keyManager = try {
+            serverKeys.tlsKeyManager()
+        } catch (e: DeviceKeyException) {
+            Log.e(TAG, "Server key unavailable; not starting", e)
+            controller.update(ServerRunState.Failed(DomainError.DeviceKeyUnavailable))
+            return@withLock
+        }
         try {
-            server = embeddedServer(Netty, port = port, host = host) { privateTrackerApi(dependencies) }.start(wait = false)
+            server = tlsServer(port, host, keyManager) { privateTrackerApi(dependencies) }.start(wait = false)
             Log.i(TAG, "Listening on $host:$port")
             controller.update(ServerRunState.Running(port))
         } catch (e: CancellationException) {

@@ -107,7 +107,7 @@ class Simulation(
     }
 
     private suspend fun checkServer(): ConnectionCheck {
-        val check = when (val outcome = TestServerConnection(gatewayFactory(InMemoryDeviceKeys()), clock)(options.serverUrl)) {
+        val check = when (val outcome = TestServerConnection(gatewayFactory(InMemoryDeviceKeys()), clock)(options.serverUrl, options.serverFingerprint)) {
             is Outcome.Success -> outcome.value
             is Outcome.Failure -> throw SimulationAborted("No se pudo conectar con ${options.serverUrl}: ${outcome.error.code}")
         }

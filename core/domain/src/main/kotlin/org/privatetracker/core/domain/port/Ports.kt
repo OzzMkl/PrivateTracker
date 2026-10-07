@@ -15,6 +15,7 @@ import org.privatetracker.core.domain.model.NetworkAddress
 import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.ServerActivity
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.TrackerActivity
 import java.time.Duration
 import java.time.Instant
@@ -29,19 +30,21 @@ interface TransactionRunner {
  * so they come back as [Outcome.Failure] instead of exceptions.
  */
 interface ServerGateway {
-    /** With a [challenge], the server signs it with its own key; see [org.privatetracker.core.domain.model.ServerIdentity]. */
-    suspend fun health(serverUrl: String, challenge: String? = null): Outcome<ServerInfo>
-    suspend fun register(serverUrl: String, registration: DeviceRegistration): Outcome<RegistrationResult>
-
     /**
-     * With the [serverKey] this tracker pinned, the answer only counts if the server signed it with
-     * that key; anything else is [org.privatetracker.core.common.result.DomainError.ServerIdentityMismatch].
+     * Every call goes over TLS to a server holding the key [pin] names. A server with another key is
+     * refused during the handshake, before a byte is sent, as
+     * [ServerIdentityMismatch][org.privatetracker.core.common.result.DomainError.ServerIdentityMismatch].
+     * With a [challenge], the server also signs it; see [org.privatetracker.core.domain.model.ServerIdentity].
      */
+    suspend fun health(serverUrl: String, pin: ServerPin, challenge: String? = null): Outcome<ServerInfo>
+    suspend fun register(serverUrl: String, pin: ServerPin, registration: DeviceRegistration): Outcome<RegistrationResult>
+
+    /** With a whole key as [pin], the answer also only counts if the server signed it with that key. */
     suspend fun uploadLocations(
         serverUrl: String,
+        pin: ServerPin,
         deviceId: DeviceId,
         locations: List<Location>,
-        serverKey: String? = null,
     ): Outcome<LocationBatchResult>
 }
 
@@ -62,7 +65,8 @@ class DeviceKeyException(message: String, cause: Throwable? = null) : Exception(
 
 /**
  * The server's own identity key, ECDSA P-256 like the device keys. Trackers pin it when they pair, so
- * they can tell their server from any other at the same address. Throws [DeviceKeyException] on failure.
+ * they can tell their server from any other at the same address; from 0.4 it is also the key of the
+ * server's TLS certificate. Throws [DeviceKeyException] on failure.
  */
 interface ServerKeys {
     suspend fun publicKey(): String
