@@ -33,6 +33,11 @@ include(":core:domain")
 include(":core:protocol")
 include(":core:network")
 include(":server:api")
+include(":server:netty")
+// The server on a Linux host or in Docker (1.0): the same API, keys in files, run from the command line.
+include(":server:linux")
+// Its web app (1.0): pages made on the server, for any Ktor engine, like server:api.
+include(":server:web")
 
 // Android data layer.
 include(":core:database")
@@ -52,6 +57,7 @@ include(":feature:tracker")
 include(":feature:server")
 include(":feature:devices")
 include(":feature:settings")
+include(":feature:geofences")
 
 // Developer tools that run on a PC; never part of the app.
 include(":tools:simulator")

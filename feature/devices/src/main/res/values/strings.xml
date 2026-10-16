@@ -63,6 +63,7 @@
     <string name="cancel">Cancelar</string>
     <string name="save">Guardar</string>
     <string name="more">Más opciones</string>
+    <string name="devices_map_geofences">Geocercas</string>
 
     <!-- Historial -->
     <string name="device_history_open">Ver recorridos</string>

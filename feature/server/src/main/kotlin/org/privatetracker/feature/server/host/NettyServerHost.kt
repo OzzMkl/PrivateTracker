@@ -17,6 +17,7 @@ import org.privatetracker.core.security.KeystoreServerKeys
 import org.privatetracker.feature.server.service.ServiceServerController
 import org.privatetracker.server.api.ServerDependencies
 import org.privatetracker.server.api.privateTrackerApi
+import org.privatetracker.server.netty.tlsServer
 import java.net.BindException
 import javax.inject.Inject
 import javax.inject.Singleton

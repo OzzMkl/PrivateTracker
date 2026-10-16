@@ -36,14 +36,22 @@ import org.privatetracker.feature.devices.markerStyle
 import org.privatetracker.feature.devices.tone
 
 @Composable
-fun DevicesMapRoute(onOpenDevice: (DeviceId) -> Unit, viewModel: DevicesMapViewModel = hiltViewModel()) {
+fun DevicesMapRoute(onOpenDevice: (DeviceId) -> Unit, onOpenGeofences: () -> Unit, viewModel: DevicesMapViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    DevicesMapScreen(state, onSelect = viewModel::onSelect, onOpenDevice = onOpenDevice)
+    DevicesMapScreen(state, onSelect = viewModel::onSelect, onOpenDevice = onOpenDevice, onOpenGeofences = onOpenGeofences)
 }
 
 @Composable
-fun DevicesMapScreen(state: DevicesMapUiState, onSelect: (String?) -> Unit, onOpenDevice: (DeviceId) -> Unit) {
-    ScreenScaffold(title = stringResource(R.string.devices_map_title)) { padding ->
+fun DevicesMapScreen(
+    state: DevicesMapUiState,
+    onSelect: (String?) -> Unit,
+    onOpenDevice: (DeviceId) -> Unit,
+    onOpenGeofences: () -> Unit,
+) {
+    ScreenScaffold(
+        title = stringResource(R.string.devices_map_title),
+        actions = { TextButton(onClick = onOpenGeofences) { Text(stringResource(R.string.devices_map_geofences)) } },
+    ) { padding ->
         val located = state.located
         if (located == null) {
             LoadingBox(Modifier.padding(padding))
@@ -59,6 +67,7 @@ fun DevicesMapScreen(state: DevicesMapUiState, onSelect: (String?) -> Unit, onOp
                     val location = checkNotNull(overview.lastLocation)
                     MapMarker(overview.device.id.value, location.latitude, location.longitude, overview.status.markerStyle())
                 },
+                areas = state.geofences,
                 selectedId = state.selected?.device?.id?.value,
                 onMarkerClick = onSelect,
                 onMapClick = { onSelect(null) },

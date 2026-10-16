@@ -25,6 +25,7 @@ import org.privatetracker.core.protocol.crypto.InMemoryDeviceKeys
 import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.security.KeystoreKeys
 import org.privatetracker.core.security.KeystoreServerKeys
+import org.privatetracker.server.netty.tlsServer
 import java.io.IOException
 import java.net.Socket
 import java.net.URL

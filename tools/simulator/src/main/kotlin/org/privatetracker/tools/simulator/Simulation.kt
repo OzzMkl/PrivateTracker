@@ -208,7 +208,8 @@ class Simulation(
         appendLine()
         if (result.trackerSideClean) {
             appendLine("Lado del Tracker: sin pérdidas. Falta comparar con server.db:")
-            append("  simulator verify --run ${options.outDir} --pull")
+            appendLine("  simulator verify --run ${options.outDir} --pull               (servidor en un teléfono)")
+            append("  simulator verify --run ${options.outDir} --db <server.db>     (servidor Linux, ya detenido)")
         } else {
             append("Lado del Tracker: hay posiciones rechazadas, descartadas o pendientes; la corrida no cumple el criterio.")
         }

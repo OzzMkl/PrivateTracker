@@ -43,7 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -224,7 +225,7 @@ private fun Summary(track: Track) {
 private fun DaysDialog(onPick: (HistorySelection.Days) -> Unit, onDismiss: () -> Unit) {
     val today = remember { LocalDate.now() }
     // The calendar grid needs 360 dp too; narrower screens start with the typed dates, which fit.
-    val narrow = LocalConfiguration.current.screenWidthDp < CALENDAR_MIN_WIDTH_DP
+    val narrow = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() } < CALENDAR_MIN_WIDTH
     val picker = rememberDateRangePickerState(
         initialDisplayMode = if (narrow) DisplayMode.Input else DisplayMode.Picker,
         selectableDates = object : SelectableDates {
@@ -252,7 +253,7 @@ private fun DaysDialog(onPick: (HistorySelection.Days) -> Unit, onDismiss: () ->
     }
 }
 
-private const val CALENDAR_MIN_WIDTH_DP = 360
+private val CALENDAR_MIN_WIDTH = 360.dp
 
 /** The picker hands out midnight UTC of the chosen day. */
 private fun Long.toUtcDate(): LocalDate = Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()

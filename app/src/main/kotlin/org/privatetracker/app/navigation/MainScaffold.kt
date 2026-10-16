@@ -28,6 +28,8 @@ import org.privatetracker.core.domain.model.AppMode
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.feature.devices.detail.DeviceDetailRoute
 import org.privatetracker.feature.devices.history.DeviceHistoryRoute
+import org.privatetracker.feature.geofences.editor.GeofenceEditorRoute
+import org.privatetracker.feature.geofences.list.GeofencesRoute
 import org.privatetracker.feature.devices.list.DeviceListRoute
 import org.privatetracker.feature.devices.map.DevicesMapRoute
 import org.privatetracker.feature.onboarding.PermissionsRoute
@@ -99,7 +101,7 @@ fun MainScaffold(mode: AppMode, pairingLink: String?, onPairingLinkHandled: () -
                 rememberViewModelStoreNavEntryDecorator(),
             ),
             entryProvider = entryProvider {
-                entry<MapKey> { DevicesMapRoute(onOpenDevice = openDevice) }
+                entry<MapKey> { DevicesMapRoute(onOpenDevice = openDevice, onOpenGeofences = { backStack.add(GeofencesKey) }) }
                 entry<DevicesKey> { DeviceListRoute(onOpenDevice = openDevice) }
                 entry<ServerKey> {
                     ServerRoute(
@@ -129,6 +131,8 @@ fun MainScaffold(mode: AppMode, pairingLink: String?, onPairingLinkHandled: () -
                     DeviceDetailRoute(deviceId = key.deviceId, onBack = pop, onOpenHistory = { backStack.add(DeviceHistoryKey(key.deviceId)) })
                 }
                 entry<DeviceHistoryKey> { key -> DeviceHistoryRoute(deviceId = key.deviceId, onBack = pop) }
+                entry<GeofencesKey> { GeofencesRoute(onBack = pop, onOpen = { id -> backStack.add(GeofenceEditorKey(id?.value)) }) }
+                entry<GeofenceEditorKey> { key -> GeofenceEditorRoute(geofenceId = key.geofenceId, onDone = pop) }
                 entry<PermissionsKey> {
                     PermissionsRoute(mode = mode, doneLabel = stringResource(R.string.permissions_done), onDone = pop, onBack = pop)
                 }

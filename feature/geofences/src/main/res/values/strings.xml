@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="geofence_channel">Geocercas</string>
+    <string name="geofence_alert_enter">%1$s llegó a %2$s</string>
+    <string name="geofence_alert_exit">%1$s salió de %2$s</string>
+    <string name="geofence_alert_at">A las %1$s</string>
+
+    <!-- Lista -->
+    <string name="geofence_list_title">Geocercas</string>
+    <string name="geofence_new">Nueva geocerca</string>
+    <string name="geofence_none">Aún no hay geocercas. Crea una para saber cuándo un dispositivo llega a un lugar o sale de él.</string>
+    <string name="geofence_section_areas">Geocercas</string>
+    <string name="geofence_section_events">Últimos cruces</string>
+    <string name="geofence_no_events">Todavía nadie ha cruzado una geocerca.</string>
+    <string name="geofence_muted">Las notificaciones están bloqueadas en este teléfono: los cruces se registran, pero no suenan.</string>
+    <string name="geofence_unmute">Permitir</string>
+    <string name="geofence_circle_summary">Círculo de %1$s</string>
+    <plurals name="geofence_polygon_summary">
+        <item quantity="one">Polígono de %d vértice</item>
+        <item quantity="many">Polígono de %d vértices</item>
+        <item quantity="other">Polígono de %d vértices</item>
+    </plurals>
+    <string name="geofence_all_devices">Todos los dispositivos</string>
+    <plurals name="geofence_some_devices">
+        <item quantity="one">%d dispositivo</item>
+        <item quantity="many">%d dispositivos</item>
+        <item quantity="other">%d dispositivos</item>
+    </plurals>
+    <string name="geofence_notifies_both">Avisa al entrar y al salir</string>
+    <string name="geofence_notifies_enter">Avisa al entrar</string>
+    <string name="geofence_notifies_exit">Avisa al salir</string>
+    <string name="geofence_notifies_none">Solo registra</string>
+    <string name="geofence_event_enter">%1$s entró a %2$s</string>
+    <string name="geofence_event_exit">%1$s salió de %2$s</string>
+    <string name="geofence_event_silent">sin aviso</string>
+    <string name="geofence_meters">%1$.0f m</string>
+    <string name="geofence_km">%1$.1f km</string>
+
+    <!-- Editor -->
+    <string name="geofence_edit_title">Editar geocerca</string>
+    <string name="geofence_create_title">Nueva geocerca</string>
+    <string name="geofence_circle">Círculo</string>
+    <string name="geofence_polygon">Polígono</string>
+    <string name="geofence_circle_hint">Toca el mapa para poner el centro y ajusta el radio.</string>
+    <string name="geofence_polygon_hint">Toca el mapa para agregar vértices, en orden alrededor del lugar.</string>
+    <string name="geofence_radius">Radio: %1$s</string>
+    <string name="geofence_undo">Quitar último</string>
+    <string name="geofence_clear">Empezar de nuevo</string>
+    <string name="geofence_name">Nombre</string>
+    <string name="geofence_devices">Dispositivos</string>
+    <string name="geofence_notify_enter">Avisar cuando entre</string>
+    <string name="geofence_notify_exit">Avisar cuando salga</string>
+    <string name="geofence_save">Guardar</string>
+    <string name="geofence_delete">Borrar</string>
+    <string name="geofence_delete_title">¿Borrar la geocerca?</string>
+    <string name="geofence_delete_body">Se borran también sus cruces registrados.</string>
+    <string name="geofence_cancel">Cancelar</string>
+    <string name="geofence_error_center">Toca el mapa para poner el centro.</string>
+    <string name="geofence_error_radius">El radio va de 50 m a 50 km.</string>
+    <string name="geofence_error_vertices_count">Un polígono necesita de 3 a 50 vértices y que quepa dentro un círculo de 50 m: unos 100 m de ancho.</string>
+    <string name="geofence_error_vertices_shape">Los lados del polígono se cruzan: quita vértices o empieza de nuevo.</string>
+    <string name="geofence_error_devices">Elige al menos un dispositivo.</string>
+</resources>

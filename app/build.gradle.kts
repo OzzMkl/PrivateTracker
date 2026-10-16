@@ -19,7 +19,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "0.1.0-alpha"
+        versionName = providers.gradleProperty("privatetracker.versionName").get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -62,6 +62,8 @@ android {
 dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
+    // The DataStore files and Room databases core:data works on are created in di/DataModules.kt.
+    implementation(project(":core:datastore"))
     implementation(project(":core:network"))
     implementation(project(":core:protocol"))
     implementation(project(":core:location"))
@@ -72,6 +74,7 @@ dependencies {
     implementation(project(":feature:server"))
     implementation(project(":feature:devices"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:geofences"))
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.navigation3.runtime)

@@ -13,6 +13,7 @@ import org.privatetracker.core.domain.model.Platform
 import org.privatetracker.core.domain.port.BatteryLevelProvider
 import org.privatetracker.core.domain.port.DeviceKeys
 import org.privatetracker.core.domain.port.EncryptionKeyVault
+import org.privatetracker.core.domain.port.GeofenceAlerts
 import org.privatetracker.core.domain.port.NetworkInfoProvider
 import org.privatetracker.core.domain.port.NonceRegistry
 import org.privatetracker.core.domain.port.PermissionChecker
@@ -27,6 +28,7 @@ import org.privatetracker.core.domain.port.UploadScheduler
 import org.privatetracker.core.domain.repository.AppModeRepository
 import org.privatetracker.core.domain.repository.DeviceRepository
 import org.privatetracker.core.domain.repository.EncryptionKeyRepository
+import org.privatetracker.core.domain.repository.GeofenceRepository
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.LocationRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
@@ -45,24 +47,31 @@ import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.CloseAllSessions
 import org.privatetracker.core.domain.usecase.server.CloseInactiveSessions
 import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
+import org.privatetracker.core.domain.usecase.server.DeleteGeofence
 import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
+import org.privatetracker.core.domain.usecase.server.EvaluateGeofences
 import org.privatetracker.core.domain.usecase.server.ExportDeviceHistory
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceTrack
+import org.privatetracker.core.domain.usecase.server.GetGeofence
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.GetServerKeyFingerprint
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
 import org.privatetracker.core.domain.usecase.server.ObserveDeviceDetail
 import org.privatetracker.core.domain.usecase.server.ObserveEncryptionKey
+import org.privatetracker.core.domain.usecase.server.ObserveGeofenceEvents
+import org.privatetracker.core.domain.usecase.server.ObserveGeofences
 import org.privatetracker.core.domain.usecase.server.ObserveDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.ObservePairedDevice
 import org.privatetracker.core.domain.usecase.server.ObserveServerStatus
 import org.privatetracker.core.domain.usecase.server.PurgeExpiredLocations
+import org.privatetracker.core.domain.usecase.server.PurgeGeofenceEvents
 import org.privatetracker.core.domain.usecase.server.RegisterOrUpdateDevice
 import org.privatetracker.core.domain.usecase.server.RemoveDevice
 import org.privatetracker.core.domain.usecase.server.RenameDevice
 import org.privatetracker.core.domain.usecase.server.RestoreServer
 import org.privatetracker.core.domain.usecase.server.RotateEncryptionKey
+import org.privatetracker.core.domain.usecase.server.SaveGeofence
 import org.privatetracker.core.domain.usecase.server.SetDeviceApproval
 import org.privatetracker.core.domain.usecase.server.StartServer
 import org.privatetracker.core.domain.usecase.server.StopServer
@@ -197,7 +206,27 @@ object DomainModule {
         validator: LocationValidator,
         transactions: TransactionRunner,
         clock: Clock,
-    ) = IngestLocationBatch(devices, locations, sessions, config, sessionTracker, validator, transactions, clock)
+        evaluateGeofences: EvaluateGeofences,
+        alerts: GeofenceAlerts,
+    ) = IngestLocationBatch(devices, locations, sessions, config, sessionTracker, validator, transactions, clock, evaluateGeofences, alerts)
+
+    // Geofences
+
+    @Provides fun evaluateGeofences(geofences: GeofenceRepository, alerts: GeofenceAlerts, clock: Clock) = EvaluateGeofences(geofences, alerts, clock)
+
+    @Provides fun saveGeofence(geofences: GeofenceRepository, ids: IdGenerator, clock: Clock) = SaveGeofence(geofences, ids, clock)
+
+    @Provides fun deleteGeofence(geofences: GeofenceRepository) = DeleteGeofence(geofences)
+
+    @Provides fun getGeofence(geofences: GeofenceRepository) = GetGeofence(geofences)
+
+    @Provides fun observeGeofences(geofences: GeofenceRepository) = ObserveGeofences(geofences)
+
+    @Provides fun observeGeofenceEvents(geofences: GeofenceRepository) = ObserveGeofenceEvents(geofences)
+
+    @Provides
+    fun purgeGeofenceEvents(geofences: GeofenceRepository, config: ServerConfigRepository, clock: Clock) =
+        PurgeGeofenceEvents(geofences, config, clock)
 
     @Provides
     fun getDeviceOverviews(devices: DeviceRepository, config: ServerConfigRepository, clock: Clock) =

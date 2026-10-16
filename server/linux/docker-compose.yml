@@ -1,0 +1,44 @@
+# docker compose up -d   (after: ./gradlew :server:linux:installDist)
+services:
+  privatetracker:
+    image: privatetracker-server
+    build: .
+    container_name: privatetracker
+    restart: unless-stopped
+    ports:
+      # Docker opens published ports past ufw and firewalld. Put the address phones use in front
+      # (e.g. "192.168.1.20:8787:8787") to listen on that interface only.
+      - "8787:8787"
+      # The web app. Publish it only where you open it from, e.g. "192.168.1.20:8788:8788" or a VPN address.
+      - "8788:8788"
+    environment:
+      PRIVATETRACKER_NAME: "PrivateTracker Server"
+      # The URL phones use to reach this host: its LAN address, a VPN address or a public name.
+      PRIVATETRACKER_PUBLIC_URLS: "https://192.168.1.20:8787"
+      # "false": only phones paired with `pair` get in; nobody else can ask to join.
+      PRIVATETRACKER_ACCEPT_NEW_DEVICES: "true"
+      # Times the command line and the alert webhook print; the web app uses each browser's own zone.
+      TZ: "America/Mexico_City"
+      # Your own certificate for the web app, e.g. from `tailscale cert` (mount it read-only below);
+      # without it the browser warns once about the server's self-signed one.
+      # PRIVATETRACKER_WEB_CERT: "/certs/casa.tail1234.ts.net.crt"
+      # PRIVATETRACKER_WEB_KEY: "/certs/casa.tail1234.ts.net.key"
+      # Geofence alerts with every page closed: an ntfy topic, Gotify, Home Assistant...
+      # PRIVATETRACKER_ALERT_WEBHOOK: "https://ntfy.example.org/casa-alertas"
+    volumes:
+      - privatetracker-data:/data
+      # - ./certs:/certs:ro
+    # Nothing but /data and /tmp is written. /tmp needs exec: the bundled SQLite unpacks its native
+    # library there and loads it (Docker mounts tmpfs noexec by default).
+    read_only: true
+    tmpfs:
+      - /tmp:exec,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Answers 503 for a second, closes sessions, then exits; well within this.
+    stop_grace_period: 15s
+
+volumes:
+  privatetracker-data:

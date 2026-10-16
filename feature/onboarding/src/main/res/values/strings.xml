@@ -25,7 +25,7 @@
     <string name="why_precise_location">Para tomar la posición de este teléfono con GPS.</string>
     <string name="why_background_location">Para reanudar el rastreo cuando el teléfono se reinicia. En la pantalla de Android elige «Permitir todo el tiempo».</string>
     <string name="why_notifications_tracker">La notificación avisa en todo momento que la ubicación se está compartiendo.</string>
-    <string name="why_notifications_server">Para ver el estado del servidor en la barra de notificaciones.</string>
+    <string name="why_notifications_server">Para ver el estado del servidor en la barra de notificaciones y avisarte cuando un dispositivo cruce una geocerca.</string>
     <string name="why_local_network_tracker">Para enviar la ubicación a un servidor en tu Wi-Fi.</string>
     <string name="why_local_network_server">Para que los teléfonos de tu red puedan conectarse a este servidor.</string>
     <string name="why_battery">Evita que Android detenga el servicio para ahorrar batería. Se cambia en los ajustes del sistema.</string>

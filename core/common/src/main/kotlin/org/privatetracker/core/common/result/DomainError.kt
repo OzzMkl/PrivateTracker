@@ -49,6 +49,11 @@ sealed interface DomainError {
         override val code: String = "DEVICE_NOT_FOUND"
     }
 
+    /** The geofence was deleted meanwhile, as from another screen. */
+    data object GeofenceNotFound : DomainError {
+        override val code: String = "GEOFENCE_NOT_FOUND"
+    }
+
     data object NewDevicesDisabled : DomainError {
         override val code: String = "NEW_DEVICES_DISABLED"
     }
@@ -125,6 +130,20 @@ sealed interface DomainError {
     data class ServerStartFailed(val detail: String) : DomainError {
         override val code: String get() = "SERVER_START_FAILED"
     }
+
+    /** Wrong name or password on the web app (1.0); which of the two is never said. */
+    data object SignInFailed : DomainError {
+        override val code: String = "SIGN_IN_FAILED"
+    }
+
+    /** Too many failed sign-ins from one address or for one account; try again after [retryAfterSeconds]. */
+    data class TooManyAttempts(val retryAfterSeconds: Long) : DomainError {
+        override val code: String get() = "TOO_MANY_ATTEMPTS"
+    }
+
+    data object WebAccountNotFound : DomainError {
+        override val code: String = "WEB_ACCOUNT_NOT_FOUND"
+    }
 }
 
 /** One broken rule of one input field. [rule] is one of the constants below. */
@@ -137,6 +156,14 @@ data class FieldViolation(val field: String, val rule: String) {
 
         /** A plain `http://` address: from 0.4 servers only speak TLS. */
         const val HTTPS_REQUIRED = "https_required"
+
+        const val TOO_SHORT = "too_short"
+
+        /** A password anyone would try first, or one made from the account's own name. */
+        const val TOO_COMMON = "too_common"
+
+        /** Another item already has this name. */
+        const val TAKEN = "taken"
     }
 }
 

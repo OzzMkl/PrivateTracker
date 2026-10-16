@@ -25,6 +25,7 @@ fun DomainError.message(): String = when (this) {
     DomainError.NotConfigured -> stringResource(R.string.error_not_configured)
     DomainError.DeviceNotRegistered -> stringResource(R.string.error_device_not_registered)
     DomainError.DeviceNotFound -> stringResource(R.string.error_device_not_found)
+    DomainError.GeofenceNotFound -> stringResource(R.string.error_geofence_not_found)
     DomainError.NewDevicesDisabled -> stringResource(R.string.error_new_devices_disabled)
     DomainError.DevicePendingApproval -> stringResource(R.string.error_device_pending)
     DomainError.DeviceRejected -> stringResource(R.string.error_device_rejected)
@@ -47,6 +48,8 @@ fun DomainError.message(): String = when (this) {
     is DomainError.Permission -> stringResource(R.string.error_permission, missing.map { permissionLabel(it) }.joinToString())
     is DomainError.PortInUse -> stringResource(R.string.error_port_in_use, port)
     is DomainError.ServerStartFailed -> stringResource(R.string.error_server_start_failed, detail)
+    // Only the web app of a Linux server signs anyone in; the phone never shows these.
+    DomainError.SignInFailed, is DomainError.TooManyAttempts, DomainError.WebAccountNotFound -> code
 }
 
 /** Short name of a permission, from its domain name (AppPermission.name). */

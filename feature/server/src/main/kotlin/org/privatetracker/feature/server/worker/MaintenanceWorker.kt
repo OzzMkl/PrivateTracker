@@ -14,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.usecase.server.CloseInactiveSessions
 import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
+import org.privatetracker.core.domain.usecase.server.PurgeGeofenceEvents
 import org.privatetracker.core.domain.usecase.server.PurgeExpiredLocations
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -37,8 +38,9 @@ class MaintenanceScheduler @Inject constructor(@ApplicationContext private val c
 }
 
 /**
- * Daily: closes sessions of silent devices, applies the retention period, and rotates the encryption
- * key when due, which also deletes keys past their time even if no tracker asked for a key lately.
+ * Daily: closes sessions of silent devices, applies the retention period to locations and geofence
+ * events, and rotates the encryption key when due, which also deletes keys past their time even if no
+ * tracker asked for a key lately.
  */
 @HiltWorker
 class MaintenanceWorker @AssistedInject constructor(
@@ -46,18 +48,20 @@ class MaintenanceWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val closeInactiveSessions: CloseInactiveSessions,
     private val purgeExpiredLocations: PurgeExpiredLocations,
+    private val purgeGeofenceEvents: PurgeGeofenceEvents,
     private val encryptionKeys: EncryptionKeyRing,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val closed = closeInactiveSessions()
         val purged = purgeExpiredLocations()
+        val purgedEvents = purgeGeofenceEvents()
         val key = try {
             encryptionKeys.current().key.id
         } catch (e: DeviceKeyException) {
             Log.e(TAG, "Encryption key unavailable", e)
             null
         }
-        Log.i(TAG, "Closed $closed sessions, purged $purged locations, encryption key $key")
+        Log.i(TAG, "Closed $closed sessions, purged $purged locations and $purgedEvents geofence events, encryption key $key")
         return Result.success()
     }
 

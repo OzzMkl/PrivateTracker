@@ -22,6 +22,8 @@ import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.port.ServerGateway
 import org.privatetracker.core.domain.service.SessionTracker
 import org.privatetracker.core.domain.testing.DEVICE_A
+import org.privatetracker.core.domain.testing.RecordingGeofenceAlerts
+import org.privatetracker.core.domain.testing.InMemoryGeofences
 import org.privatetracker.core.domain.testing.FakeClock
 import org.privatetracker.core.domain.testing.FixedBattery
 import org.privatetracker.core.domain.testing.ImmediateTransactionRunner
@@ -42,6 +44,7 @@ import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
 import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
+import org.privatetracker.core.domain.usecase.server.EvaluateGeofences
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
 import org.privatetracker.core.domain.usecase.server.RegisterOrUpdateDevice
 import org.privatetracker.core.domain.usecase.server.VerifyRequestSignature
@@ -100,6 +103,7 @@ class TrackerServerContractTest {
             authenticateDevice = AuthenticateDevice(serverStore, verifySignature),
             ingestLocationBatch = IngestLocationBatch(
                 serverStore, serverStore, serverStore, config, sessions, LocationValidator(clock), ImmediateTransactionRunner, clock,
+                EvaluateGeofences(InMemoryGeofences(), RecordingGeofenceAlerts(), clock), RecordingGeofenceAlerts(),
             ),
             getDeviceOverviews = GetDeviceOverviews(serverStore, config, clock),
             getDeviceDetail = GetDeviceDetail(serverStore, serverStore, config, clock),

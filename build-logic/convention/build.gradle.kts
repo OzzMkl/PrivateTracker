@@ -25,6 +25,10 @@ gradlePlugin {
             id = "privatetracker.android.hilt"
             implementationClass = "HiltConventionPlugin"
         }
+        register("kmpLibrary") {
+            id = "privatetracker.kmp.library"
+            implementationClass = "KmpLibraryConventionPlugin"
+        }
         register("androidFeature") {
             id = "privatetracker.android.feature"
             implementationClass = "AndroidFeatureConventionPlugin"

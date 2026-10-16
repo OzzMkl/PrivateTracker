@@ -8,6 +8,7 @@ import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.DiscoveredServer
 import org.privatetracker.core.domain.model.EncryptionKey
+import org.privatetracker.core.domain.model.GeofenceEventView
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationFix
@@ -118,6 +119,30 @@ interface SignatureVerifier {
 fun interface NonceRegistry {
     /** Remembers [nonce] of [deviceId] until [expiresAt]. False when it was already seen: a replay. */
     fun register(deviceId: DeviceId, nonce: String, expiresAt: Instant): Boolean
+}
+
+/**
+ * Slow, salted hashes of web account passwords (1.0). Hashing is meant to cost a noticeable fraction
+ * of a second, so a stolen file of hashes is slow to guess from; implementations keep that work off
+ * the caller's thread.
+ */
+interface PasswordHasher {
+    suspend fun hash(password: String): String
+
+    /** False also for an [encoded] hash it cannot read. Takes as long either way. */
+    suspend fun verify(password: String, encoded: String): Boolean
+
+    /** True when [encoded] was made with weaker settings than this hasher uses now: hash it again at the next sign-in. */
+    fun isOutdated(encoded: String): Boolean
+}
+
+/** Tells the server's owner that devices crossed geofences, from 0.7 on: local notifications on Android. */
+interface GeofenceAlerts {
+    /** False when the owner blocked these notifications, so a crossing would pass unseen. Never throws. */
+    fun canAlert(): Boolean
+
+    /** Never throws: an alert that cannot be shown must not undo the positions that caused it. */
+    fun alert(events: List<GeofenceEventView>)
 }
 
 /** Finds PrivateTracker servers announcing themselves on the local network. */

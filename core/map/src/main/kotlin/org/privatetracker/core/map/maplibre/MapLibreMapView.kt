@@ -40,12 +40,15 @@ import org.maplibre.android.style.expressions.Expression.match
 import org.maplibre.android.style.expressions.Expression.stop
 import org.maplibre.android.style.expressions.Expression.switchCase
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
+import org.maplibre.android.style.layers.PropertyFactory.fillColor
+import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineJoin
@@ -55,8 +58,10 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.MultiLineString
+import org.maplibre.geojson.Polygon
 import org.maplibre.geojson.Point
 import org.privatetracker.core.designsystem.theme.LocalStatusColors
+import org.privatetracker.core.map.MapArea
 import org.privatetracker.core.map.MapCamera
 import org.privatetracker.core.map.MapMarker
 import org.privatetracker.core.map.MapPoint
@@ -69,6 +74,10 @@ private const val MARKER_SOURCE_ID = "markers"
 private const val MARKER_LAYER_ID = "markers"
 private const val TRACK_SOURCE_ID = "tracks"
 private const val TRACK_LAYER_ID = "tracks"
+private const val AREA_SOURCE_ID = "areas"
+private const val AREA_FILL_LAYER_ID = "areas-fill"
+private const val AREA_EDGE_LAYER_ID = "areas-edge"
+private const val PROP_EMPHASIZED = "emphasized"
 private const val PROP_ID = "id"
 private const val PROP_STYLE = "style"
 private const val PROP_SELECTED = "selected"
@@ -89,12 +98,15 @@ internal fun MapLibreMapView(
     markers: List<MapMarker>,
     tracks: List<MapTrack>,
     onTracksDrawn: () -> Unit,
+    areas: List<MapArea>,
     camera: MapCamera,
     selectedId: String?,
     interactive: Boolean,
     tiles: TileSourceConfig,
     onMarkerClick: (String) -> Unit,
     onMapClick: () -> Unit,
+    onMapTap: (MapPoint) -> Unit,
+    markersClickable: Boolean,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -114,6 +126,8 @@ internal fun MapLibreMapView(
     val currentOnMarkerClick by rememberUpdatedState(onMarkerClick)
     val currentOnTracksDrawn by rememberUpdatedState(onTracksDrawn)
     val currentOnMapClick by rememberUpdatedState(onMapClick)
+    val currentOnMapTap by rememberUpdatedState(onMapTap)
+    val currentMarkersClickable by rememberUpdatedState(markersClickable)
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
 
@@ -127,8 +141,17 @@ internal fun MapLibreMapView(
         ready.addOnMapClickListener { latLng ->
             val point = ready.projection.toScreenLocation(latLng)
             val area = RectF(point.x - touchSlop, point.y - touchSlop, point.x + touchSlop, point.y + touchSlop)
-            val id = ready.queryRenderedFeatures(area, MARKER_LAYER_ID).firstNotNullOfOrNull { it.getStringProperty(PROP_ID) }
-            if (id != null) currentOnMarkerClick(id) else currentOnMapClick()
+            val id = if (!currentMarkersClickable) {
+                null
+            } else {
+                ready.queryRenderedFeatures(area, MARKER_LAYER_ID).firstNotNullOfOrNull { it.getStringProperty(PROP_ID) }
+            }
+            if (id != null) {
+                currentOnMarkerClick(id)
+            } else {
+                currentOnMapClick()
+                currentOnMapTap(MapPoint(latLng.latitude, latLng.longitude))
+            }
             true
         }
         map = ready
@@ -140,6 +163,9 @@ internal fun MapLibreMapView(
         style = ready.awaitStyle(
             Style.Builder()
                 .fromJson(rasterStyleJson(tiles))
+                .withSource(GeoJsonSource(AREA_SOURCE_ID))
+                .withLayer(areaFillLayer(colors))
+                .withLayer(areaEdgeLayer(colors))
                 .withSource(GeoJsonSource(TRACK_SOURCE_ID))
                 .withLayer(trackLayer(colors))
                 .withSource(GeoJsonSource(MARKER_SOURCE_ID))
@@ -157,6 +183,10 @@ internal fun MapLibreMapView(
         style?.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)?.setGeoJson(markers.toFeatures(selectedId))
     }
 
+    LaunchedEffect(style, areas) {
+        style?.getSourceAs<GeoJsonSource>(AREA_SOURCE_ID)?.setGeoJson(areas.toAreaFeatures())
+    }
+
     LaunchedEffect(style, tracks) {
         val source = style?.getSourceAs<GeoJsonSource>(TRACK_SOURCE_ID) ?: return@LaunchedEffect
         source.setGeoJson(tracks.toFeatures())
@@ -168,12 +198,13 @@ internal fun MapLibreMapView(
     }
 
     // Fitting follows the set of markers and tracks, not their positions, so a device that moves does not undo the user's panning.
-    val cameraKey: Any = if (camera is MapCamera.FitMarkers) markers.map { it.id }.toSet() to tracks else camera
+    val cameraKey: Any = if (camera is MapCamera.FitMarkers) Triple(markers.map { it.id }.toSet(), tracks, areas.map { it.id }.toSet()) else camera
     LaunchedEffect(style, cameraKey) {
         val ready = map ?: return@LaunchedEffect
         if (style == null) return@LaunchedEffect
         mapView.awaitLayout()
-        val points = markers.map { MapPoint(it.latitude, it.longitude) } + tracks.flatMap { track -> track.segments.flatten() }
+        val points = markers.map { MapPoint(it.latitude, it.longitude) } + tracks.flatMap { track -> track.segments.flatten() } +
+            areas.flatMap { it.outline }
         ready.moveTo(camera, points, padding = (touchSlop * 2).toInt())
     }
 
@@ -210,6 +241,31 @@ private fun MapViewLifecycle(mapView: MapView, owner: LifecycleOwner) {
     }
 }
 
+private fun areaFillLayer(colors: MarkerColors): FillLayer =
+    FillLayer(AREA_FILL_LAYER_ID, AREA_SOURCE_ID).withProperties(
+        fillColor(colors.track),
+        fillOpacity(switchCase(eq(get(PROP_EMPHASIZED), true), literal(0.25f), literal(0.12f))),
+    )
+
+private fun areaEdgeLayer(colors: MarkerColors): LineLayer =
+    LineLayer(AREA_EDGE_LAYER_ID, AREA_SOURCE_ID).withProperties(
+        lineColor(colors.track),
+        lineWidth(switchCase(eq(get(PROP_EMPHASIZED), true), literal(3f), literal(1.5f))),
+        lineJoin(Property.LINE_JOIN_ROUND),
+    )
+
+/** Polygons closed on their first point, as GeoJSON wants. */
+private fun List<MapArea>.toAreaFeatures(): FeatureCollection =
+    FeatureCollection.fromFeatures(
+        filter { it.outline.size >= 3 }.map { area ->
+            val ring = (area.outline + area.outline.first()).map { Point.fromLngLat(it.longitude, it.latitude) }
+            Feature.fromGeometry(Polygon.fromLngLats(listOf(ring))).apply {
+                addStringProperty(PROP_ID, area.id)
+                addBooleanProperty(PROP_EMPHASIZED, area.emphasized)
+            }
+        },
+    )
+
 private fun trackLayer(colors: MarkerColors): LineLayer =
     LineLayer(TRACK_LAYER_ID, TRACK_SOURCE_ID).withProperties(
         lineColor(colors.track),
@@ -230,9 +286,16 @@ private fun markerLayer(colors: MarkerColors): CircleLayer =
                 stop(MarkerStyle.SELF.name, color(colors.self)),
                 stop(MarkerStyle.ROUTE_START.name, color(colors.offline)),
                 stop(MarkerStyle.ROUTE_END.name, color(colors.track)),
+                stop(MarkerStyle.VERTEX.name, color(colors.track)),
             ),
         ),
-        circleRadius(switchCase(eq(get(PROP_SELECTED), true), literal(11f), literal(8f))),
+        circleRadius(
+            switchCase(
+                eq(get(PROP_SELECTED), true), literal(11f),
+                eq(get(PROP_STYLE), literal(MarkerStyle.VERTEX.name)), literal(5f),
+                literal(8f),
+            ),
+        ),
         circleStrokeColor(android.graphics.Color.WHITE),
         circleStrokeWidth(2f),
     )

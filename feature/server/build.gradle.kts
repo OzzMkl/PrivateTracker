@@ -25,16 +25,13 @@ android {
 // Server role: the screen, the foreground service hosting the API on Netty, maintenance and the start at boot.
 dependencies {
     implementation(project(":server:api"))
+    implementation(project(":server:netty"))
     implementation(project(":core:protocol"))
     implementation(project(":core:qr"))
     // The server's TLS key lives in the Keystore with its identity key: the same key.
     implementation(project(":core:security"))
 
     androidTestImplementation(project(":core:network"))
-    implementation(libs.ktor.server.netty) {
-        // Only desktop binaries for HTTP/3; the QUIC classes stay in netty-codec-classes-quic.
-        exclude(group = "io.netty", module = "netty-codec-native-quic")
-    }
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.hilt.work)

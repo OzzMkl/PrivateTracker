@@ -2,7 +2,7 @@ package org.privatetracker.core.map
 
 import androidx.compose.runtime.Immutable
 
-enum class MarkerStyle { ONLINE, STALE, OFFLINE, SELF, ROUTE_START, ROUTE_END }
+enum class MarkerStyle { ONLINE, STALE, OFFLINE, SELF, ROUTE_START, ROUTE_END, VERTEX }
 
 /** A point on the map. [id] comes back in the click callback. */
 @Immutable
@@ -15,6 +15,10 @@ data class MapMarker(
 
 @Immutable
 data class MapPoint(val latitude: Double, val longitude: Double)
+
+/** An area drawn filled with its edge, such as a geofence: [outline] closes on itself. */
+@Immutable
+data class MapArea(val id: String, val outline: List<MapPoint>, val emphasized: Boolean = false)
 
 /** A route drawn as a line, one per stretch: [segments] are not joined to each other. */
 @Immutable

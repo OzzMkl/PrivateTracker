@@ -2,6 +2,7 @@ package org.privatetracker.core.domain.usecase.server
 
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import org.privatetracker.core.common.id.IdGenerator
 import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.FieldViolation
@@ -9,6 +10,10 @@ import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceRegistration
 import org.privatetracker.core.domain.model.DeviceStatus
+import org.privatetracker.core.domain.model.GeoPoint
+import org.privatetracker.core.domain.model.Geofence
+import org.privatetracker.core.domain.model.GeofenceShape
+import org.privatetracker.core.domain.model.GeofenceTransition
 import org.privatetracker.core.domain.model.PairingClaim
 import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.RejectionReason
@@ -22,10 +27,12 @@ import org.privatetracker.core.domain.testing.FakeClock
 import org.privatetracker.core.domain.testing.FakeServerKeys
 import org.privatetracker.core.domain.testing.FakeSignatureVerifier
 import org.privatetracker.core.domain.testing.ImmediateTransactionRunner
+import org.privatetracker.core.domain.testing.InMemoryGeofences
 import org.privatetracker.core.domain.testing.InMemoryNonces
 import org.privatetracker.core.domain.testing.InMemoryPairingTickets
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.InMemoryServerStore
+import org.privatetracker.core.domain.testing.RecordingGeofenceAlerts
 import org.privatetracker.core.domain.testing.SequentialIdGenerator
 import org.privatetracker.core.domain.testing.T0
 import org.privatetracker.core.domain.testing.aDevice
@@ -62,8 +69,11 @@ private class ServerFixture(config: ServerConfig = ServerConfig()) {
     val observePaired = ObservePairedDevice(tickets, store)
     val authenticate = AuthenticateDevice(store, verifySignature)
     val setApproval = SetDeviceApproval(store, ImmediateTransactionRunner)
+    val geofences = InMemoryGeofences(store)
+    val alerts = RecordingGeofenceAlerts()
     val ingest = IngestLocationBatch(
         store, store, store, this.config, sessionTracker, LocationValidator(clock), ImmediateTransactionRunner, clock,
+        EvaluateGeofences(geofences, alerts, clock), alerts,
     )
     val overviews = GetDeviceOverviews(store, this.config, clock)
     val detail = GetDeviceDetail(store, store, this.config, clock)
@@ -608,5 +618,91 @@ class MaintenanceTest {
         assertTrue(fixture.store.storedLocations.isEmpty())
         assertTrue(fixture.store.storedSessions.isEmpty())
         assertEquals(DomainError.DeviceNotFound, fixture.remove(DEVICE_A).failureError())
+    }
+}
+
+class GeofenceIngestTest {
+    private val home = GeofenceShape.Circle(GeoPoint(19.4326, -99.1332), 200.0)
+
+    /** [northM] meters north of home, [minutes] after T0, as the device recorded it. */
+    private fun at(n: Int, minutes: Long, northM: Double) =
+        aLocation(n, latitude = 19.4326 + northM / 111_195.0, accuracyM = 10f, recordedAt = T0.plus(Duration.ofMinutes(minutes)))
+
+    private suspend fun ServerFixture.fence(deviceIds: Set<DeviceId>? = null, notifyOnEnter: Boolean = true): Geofence =
+        SaveGeofence(geofences, IdGenerator.Random, clock)(GeofenceDraft(null, "Casa", home, deviceIds, notifyOnEnter, notifyOnExit = true)).successValue()
+
+    @Test
+    fun `a device coming home is announced once, with its name and the geofence's`() = runTest {
+        val fixture = ServerFixture().also { it.enroll() }
+        val fence = fixture.fence()
+        fixture.clock.current = T0.plus(Duration.ofMinutes(10))
+
+        fixture.ingest(DEVICE_A, (0..2).map { at(it + 1, it.toLong(), 600.0) }, null).successValue()
+        assertTrue(fixture.alerts.alerted.isEmpty(), "first seen outside: nothing to announce")
+        fixture.ingest(DEVICE_A, (3..6).map { at(it + 1, it.toLong(), 0.0) }, null).successValue()
+
+        val alert = fixture.alerts.alerted.single()
+        assertEquals(GeofenceTransition.ENTER, alert.event.transition)
+        assertEquals("Casa" to "Pixel de Ana", alert.geofenceName to alert.deviceName)
+        assertEquals(T0.plus(Duration.ofMinutes(3)), alert.event.occurredAt)
+        assertEquals(fixture.clock.current, alert.event.detectedAt)
+        assertEquals(listOf(fence.id), fixture.geofences.storedEvents.map { it.geofenceId })
+    }
+
+    @Test
+    fun `a slow tracker's crossing still sounds, the window counting from the position that confirmed it`() = runTest {
+        val fixture = ServerFixture().also { it.enroll() }
+        fixture.fence()
+        // A phone lying still reports every 10 minutes: three positions span 20.
+        fixture.clock.current = T0.plus(Duration.ofMinutes(21))
+        fixture.ingest(DEVICE_A, (0..2).map { at(it + 1, it * 10L, 600.0) }, null).successValue()
+        fixture.clock.current = T0.plus(Duration.ofMinutes(51))
+
+        fixture.ingest(DEVICE_A, (3..5).map { at(it + 1, it * 10L, 0.0) }, null).successValue()
+
+        val alert = fixture.alerts.alerted.single()
+        assertEquals(T0.plus(Duration.ofMinutes(30)), alert.event.occurredAt)
+        assertTrue(alert.event.alerted)
+    }
+
+    @Test
+    fun `with notifications blocked a crossing is recorded as silent`() = runTest {
+        val fixture = ServerFixture().also { it.enroll() }
+        fixture.fence()
+        fixture.alerts.blocked = true
+        fixture.clock.current = T0.plus(Duration.ofMinutes(10))
+
+        fixture.ingest(DEVICE_A, (0..2).map { at(it + 1, it.toLong(), 600.0) } + (3..5).map { at(it + 1, it.toLong(), 0.0) }, null).successValue()
+
+        assertTrue(fixture.alerts.alerted.isEmpty())
+        assertEquals(listOf(false), fixture.geofences.storedEvents.map { it.alerted })
+    }
+
+    @Test
+    fun `a backlog is recorded without sounding, and so is a crossing the geofence does not notify`() = runTest {
+        val fixture = ServerFixture().also { it.enroll() }
+        fixture.fence()
+        val quiet = fixture.fence(notifyOnEnter = false)
+        // The tracker was offline: these positions are an hour old when they arrive.
+        fixture.clock.current = T0.plus(Duration.ofHours(1))
+
+        fixture.ingest(DEVICE_A, (0..2).map { at(it + 1, it.toLong(), 600.0) } + (3..5).map { at(it + 1, it.toLong(), 0.0) }, null).successValue()
+
+        assertTrue(fixture.alerts.alerted.isEmpty())
+        assertEquals(2, fixture.geofences.storedEvents.size)
+        assertTrue(fixture.geofences.storedEvents.none { it.alerted })
+        assertTrue(fixture.geofences.storedEvents.any { it.geofenceId == quiet.id })
+    }
+
+    @Test
+    fun `a geofence watches only the devices it names, and only positions the server accepted`() = runTest {
+        val fixture = ServerFixture().also { it.enroll() }
+        fixture.fence(deviceIds = setOf(DEVICE_B))
+        fixture.clock.current = T0.plus(Duration.ofMinutes(10))
+
+        fixture.ingest(DEVICE_A, (0..2).map { at(it + 1, it.toLong(), 600.0) } + (3..5).map { at(it + 1, it.toLong(), 0.0) }, null).successValue()
+
+        assertTrue(fixture.geofences.storedEvents.isEmpty())
+        assertTrue(fixture.geofences.storedStates.isEmpty())
     }
 }

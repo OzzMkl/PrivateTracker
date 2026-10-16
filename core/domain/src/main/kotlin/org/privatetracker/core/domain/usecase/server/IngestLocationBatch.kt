@@ -7,10 +7,12 @@ import org.privatetracker.core.common.result.asSuccess
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
+import org.privatetracker.core.domain.model.GeofenceEventView
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.RejectedLocation
+import org.privatetracker.core.domain.port.GeofenceAlerts
 import org.privatetracker.core.domain.port.TransactionRunner
 import org.privatetracker.core.domain.repository.DeviceRepository
 import org.privatetracker.core.domain.repository.LocationRepository
@@ -21,7 +23,8 @@ import org.privatetracker.core.domain.validation.LocationValidator
 
 /**
  * Stores a batch of locations from one device. Each location is accepted, reported as a duplicate
- * (already stored, so a resend is harmless) or rejected with a reason. All writes share one transaction.
+ * (already stored, so a resend is harmless) or rejected with a reason. All writes share one transaction,
+ * geofence crossings included (from 0.7); the owner is alerted once they are stored.
  */
 class IngestLocationBatch(
     private val devices: DeviceRepository,
@@ -32,6 +35,8 @@ class IngestLocationBatch(
     private val validator: LocationValidator,
     private val transaction: TransactionRunner,
     private val clock: Clock,
+    private val geofences: EvaluateGeofences,
+    private val alerts: GeofenceAlerts,
 ) {
     suspend operator fun invoke(
         deviceId: DeviceId,
@@ -53,7 +58,8 @@ class IngestLocationBatch(
             }
         }
 
-        return transaction.run<Outcome<LocationBatchResult>> {
+        var crossings = emptyList<GeofenceEventView>()
+        val outcome = transaction.run<Outcome<LocationBatchResult>> {
             val current = devices.getWithLastLocation(deviceId)
                 ?: return@run DomainError.DeviceNotRegistered.asFailure()
             // The API authenticates first; this keeps any other caller from storing for an unapproved device.
@@ -86,6 +92,7 @@ class IngestLocationBatch(
             if (accepted.isNotEmpty()) {
                 sessions.update(session.copy(locationsReceived = session.locationsReceived + accepted.size))
             }
+            crossings = geofences(current.device, accepted)
 
             LocationBatchResult(
                 accepted = accepted.map { it.id },
@@ -94,5 +101,7 @@ class IngestLocationBatch(
                 serverTime = now,
             ).asSuccess()
         }
+        if (outcome is Outcome.Success) crossings.filter { it.event.alerted }.takeIf { it.isNotEmpty() }?.let(alerts::alert)
+        return outcome
     }
 }

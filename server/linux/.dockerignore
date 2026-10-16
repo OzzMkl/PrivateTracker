@@ -1,0 +1,3 @@
+# The image needs only the distribution that installDist builds.
+*
+!build/install/privatetracker-server

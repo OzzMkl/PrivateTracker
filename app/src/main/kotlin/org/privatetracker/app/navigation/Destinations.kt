@@ -28,6 +28,11 @@ import org.privatetracker.core.designsystem.R as DesignR
 
 @Serializable data class DeviceHistoryKey(val deviceId: String) : NavKey
 
+@Serializable data object GeofencesKey : NavKey
+
+/** [geofenceId] null for a new geofence. */
+@Serializable data class GeofenceEditorKey(val geofenceId: String? = null) : NavKey
+
 @Serializable data object PermissionsKey : NavKey
 
 /** The server's QR code for pairing another phone. */

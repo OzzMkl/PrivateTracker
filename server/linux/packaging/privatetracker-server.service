@@ -1,0 +1,58 @@
+# systemd unit for PrivateTracker Server on a Linux host without Docker. See README.md.
+#   sudo useradd --system --home-dir /var/lib/privatetracker --shell /usr/sbin/nologin privatetracker
+#   sudo cp -r build/install/privatetracker-server /opt/
+#   sudo cp packaging/privatetracker-server.service /etc/systemd/system/
+#   sudo systemctl enable --now privatetracker-server
+[Unit]
+Description=PrivateTracker Server
+Wants=network-online.target
+After=network-online.target
+# A server that keeps failing (an unreadable identity.p12, a taken port) stops retrying after 5 tries in 5 minutes.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+User=privatetracker
+Group=privatetracker
+ExecStart=/opt/privatetracker-server/bin/privatetracker-server serve --data /var/lib/privatetracker
+# The URL phones use to reach this host; several are separated by commas.
+Environment=PRIVATETRACKER_PUBLIC_URLS=https://192.168.1.20:8787
+Environment="PRIVATETRACKER_NAME=PrivateTracker Server"
+# false: only phones paired with `pair` get in.
+Environment=PRIVATETRACKER_ACCEPT_NEW_DEVICES=true
+# The web app listens on 8788. Your own certificate for it (readable by this user, outside /home):
+#Environment=PRIVATETRACKER_WEB_CERT=/etc/privatetracker/casa.tail1234.ts.net.crt
+#Environment=PRIVATETRACKER_WEB_KEY=/etc/privatetracker/casa.tail1234.ts.net.key
+# Geofence alerts with every page closed: an ntfy topic, Gotify, Home Assistant...
+#Environment=PRIVATETRACKER_ALERT_WEBHOOK=https://ntfy.example.org/casa-alertas
+StateDirectory=privatetracker
+StateDirectoryMode=0700
+UMask=0077
+# The JVM exits with 143 after SIGTERM, once the server has stopped cleanly.
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+
+# Hardening. The JVM's JIT writes code at run time, so MemoryDenyWriteExecute stays off.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

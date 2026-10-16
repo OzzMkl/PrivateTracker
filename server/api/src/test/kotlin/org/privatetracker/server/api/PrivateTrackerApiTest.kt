@@ -31,8 +31,10 @@ import org.privatetracker.core.domain.testing.DEVICE_B
 import org.privatetracker.core.domain.testing.FakeClock
 import org.privatetracker.core.domain.testing.ImmediateTransactionRunner
 import org.privatetracker.core.domain.testing.InMemoryEncryptionKeyRepository
+import org.privatetracker.core.domain.testing.InMemoryGeofences
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.InMemoryServerStore
+import org.privatetracker.core.domain.testing.RecordingGeofenceAlerts
 import org.privatetracker.core.domain.testing.SequentialIdGenerator
 import org.privatetracker.core.domain.testing.aLocation
 import org.privatetracker.core.domain.testing.locationId
@@ -40,6 +42,7 @@ import org.privatetracker.core.domain.testing.successValue
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
 import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
+import org.privatetracker.core.domain.usecase.server.EvaluateGeofences
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
 import org.privatetracker.core.domain.usecase.server.GetDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.IngestLocationBatch
@@ -49,8 +52,8 @@ import org.privatetracker.core.domain.validation.LocationValidator
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.crypto.InMemoryDeviceKeys
 import org.privatetracker.core.protocol.crypto.InMemoryEncryptionKeyVault
-import org.privatetracker.core.protocol.crypto.P256
 import org.privatetracker.core.protocol.crypto.InMemoryServerKeys
+import org.privatetracker.core.protocol.crypto.P256
 import org.privatetracker.core.protocol.mapper.toDomain
 import org.privatetracker.core.protocol.mapper.toDto
 import org.privatetracker.core.protocol.v1.ApiV1
@@ -111,6 +114,7 @@ class PrivateTrackerApiTest {
             authenticateDevice = AuthenticateDevice(store, verifySignature),
             ingestLocationBatch = IngestLocationBatch(
                 store, store, store, config, sessions, LocationValidator(clock), ImmediateTransactionRunner, clock,
+                EvaluateGeofences(InMemoryGeofences(), RecordingGeofenceAlerts(), clock), RecordingGeofenceAlerts(),
             ),
             getDeviceOverviews = GetDeviceOverviews(store, config, clock),
             getDeviceDetail = GetDeviceDetail(store, store, config, clock),

@@ -25,12 +25,17 @@ fun PrivateTrackerMap(
     modifier: Modifier = Modifier,
     tracks: List<MapTrack> = emptyList(),
     onTracksDrawn: () -> Unit = {},
+    areas: List<MapArea> = emptyList(),
     camera: MapCamera = MapCamera.FitMarkers,
     selectedId: String? = null,
     interactive: Boolean = true,
     tiles: TileSourceConfig = TileSourceConfig.OpenStreetMap,
     onMarkerClick: (String) -> Unit = {},
     onMapClick: () -> Unit = {},
+    /** Where a tap that hit no marker landed, as for placing a geofence. */
+    onMapTap: (MapPoint) -> Unit = {},
+    /** False when every tap places something, so markers must not catch taps meant for the map. */
+    markersClickable: Boolean = true,
 ) {
     val uriHandler = LocalUriHandler.current
     Box(modifier) {
@@ -38,12 +43,15 @@ fun PrivateTrackerMap(
             markers = markers,
             tracks = tracks,
             onTracksDrawn = onTracksDrawn,
+            areas = areas,
             camera = camera,
             selectedId = selectedId,
             interactive = interactive,
             tiles = tiles,
             onMarkerClick = onMarkerClick,
             onMapClick = onMapClick,
+            onMapTap = onMapTap,
+            markersClickable = markersClickable,
         )
         if (!interactive) {
             // The MapView claims every touch even with gestures off. This layer takes the hit test
