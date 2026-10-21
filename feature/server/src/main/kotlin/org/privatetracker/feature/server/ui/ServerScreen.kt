@@ -46,6 +46,9 @@ import org.privatetracker.core.designsystem.text.dateTime
 import org.privatetracker.core.designsystem.text.message
 import org.privatetracker.core.domain.model.AddressKind
 import org.privatetracker.core.domain.model.EncryptionKey
+import org.privatetracker.core.domain.model.RelayAddress
+import org.privatetracker.core.domain.model.RelayRefusal
+import org.privatetracker.core.domain.model.RelayState
 import org.privatetracker.core.domain.model.ServerAddress
 import org.privatetracker.core.domain.model.ServerRunState
 import org.privatetracker.core.domain.model.ServerStatus
@@ -56,6 +59,7 @@ fun ServerRoute(
     onOpenPermissions: () -> Unit,
     onOpenDevices: () -> Unit,
     onOpenPairing: () -> Unit,
+    onOpenPeers: () -> Unit,
     viewModel: ServerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -67,6 +71,7 @@ fun ServerRoute(
         onOpenPermissions = onOpenPermissions,
         onOpenDevices = onOpenDevices,
         onOpenPairing = onOpenPairing,
+        onOpenPeers = onOpenPeers,
     )
 }
 
@@ -79,6 +84,7 @@ fun ServerScreen(
     onOpenPermissions: () -> Unit,
     onOpenDevices: () -> Unit,
     onOpenPairing: () -> Unit,
+    onOpenPeers: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ScreenScaffold(title = stringResource(R.string.server_title), snackbarHostState = snackbar) { padding ->
@@ -114,6 +120,8 @@ fun ServerScreen(
             }
             (status.state as? ServerRunState.Failed)?.let { Notice(it.error.message(), tone = StatusTone.NEGATIVE) }
             if (status.state is ServerRunState.Running) AddressesCard(status.addresses, snackbar)
+            status.config.relay?.let { relay -> RelayCard(relay, status.activity.relay, snackbar) }
+            PeersCard(state.peerCount, onOpenPeers)
             EncryptionCard(state.encryptionKey, state.rotateError, onRotateEncryptionKey, snackbar)
             Notice(stringResource(R.string.server_security_notice), tone = StatusTone.NEUTRAL)
             Notice(stringResource(R.string.server_power_hint), tone = StatusTone.NEUTRAL)
@@ -146,7 +154,8 @@ private fun StatusCard(
             stringResource(if (status.config.acceptNewDevices) R.string.server_yes else R.string.server_no),
         )
         InfoRow(stringResource(R.string.server_key_fingerprint), keyFingerprint ?: "…")
-        if (status.state is ServerRunState.Running && status.addresses.isNotEmpty()) {
+        // With a relay, a phone on mobile data alone can still hand out a code.
+        if (status.state is ServerRunState.Running && (status.addresses.isNotEmpty() || status.config.relay != null)) {
             Button(onClick = onOpenPairing, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.server_pair)) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -159,6 +168,59 @@ private fun StatusCard(
                     Button(onClick = onStart, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.server_start)) }
             }
         }
+    }
+}
+
+/** The tunnel to the relay of the settings: how it is doing, and the address it gives trackers. */
+@Composable
+private fun RelayCard(relay: RelayAddress, state: RelayState, snackbar: SnackbarHostState) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    val copied = stringResource(R.string.server_copied)
+    SectionCard(title = stringResource(R.string.server_relay)) {
+        when (state) {
+            RelayState.Off -> StatusBadge(stringResource(R.string.server_relay_off), StatusTone.NEUTRAL)
+            RelayState.Connecting -> StatusBadge(stringResource(R.string.server_relay_connecting), StatusTone.WARNING)
+            is RelayState.Connected -> StatusBadge(stringResource(R.string.server_relay_connected), StatusTone.POSITIVE)
+            is RelayState.Refused -> StatusBadge(
+                stringResource(if (state.reason == RelayRefusal.VERSION) R.string.server_relay_version else R.string.server_relay_not_allowed),
+                StatusTone.NEGATIVE,
+            )
+            RelayState.KeyMismatch -> StatusBadge(stringResource(R.string.server_relay_key_mismatch), StatusTone.NEGATIVE)
+            is RelayState.Unreachable -> StatusBadge(stringResource(R.string.server_relay_unreachable), StatusTone.WARNING)
+        }
+        InfoRow(stringResource(R.string.server_relay_address), relay.toString())
+        (state as? RelayState.Connected)?.let { connected ->
+            Text(stringResource(R.string.server_relay_url), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SelectionContainer(Modifier.weight(1f)) { Text(connected.trackerUrl, style = MaterialTheme.typography.bodyLarge) }
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(connected.trackerUrl, connected.trackerUrl)))
+                            snackbar.showSnackbar(copied)
+                        }
+                    },
+                ) { Text(stringResource(R.string.server_copy)) }
+            }
+        }
+        Text(
+            stringResource(R.string.server_relay_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Other servers this one shares its devices and locations with, from 1.0. */
+@Composable
+private fun PeersCard(count: Int, onOpen: () -> Unit) {
+    SectionCard(title = stringResource(R.string.server_peers_title)) {
+        Text(
+            if (count == 0) stringResource(R.string.server_peers_none) else pluralStringResource(R.plurals.server_peers_count, count, count),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.server_peers_manage)) }
     }
 }
 

@@ -25,6 +25,9 @@ Environment=PRIVATETRACKER_ACCEPT_NEW_DEVICES=true
 #Environment=PRIVATETRACKER_WEB_KEY=/etc/privatetracker/casa.tail1234.ts.net.key
 # Geofence alerts with every page closed: an ntfy topic, Gotify, Home Assistant...
 #Environment=PRIVATETRACKER_ALERT_WEBHOOK=https://ntfy.example.org/casa-alertas
+# Reachable from anywhere without opening ports, through a privatetracker-relay:
+#Environment=PRIVATETRACKER_RELAY=relay.example.org
+#Environment=PRIVATETRACKER_RELAY_FINGERPRINT=1A2B-3C4D-5E6F-7A8B
 StateDirectory=privatetracker
 StateDirectoryMode=0700
 UMask=0077

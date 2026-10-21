@@ -19,12 +19,12 @@ class AuthTest {
         val nonces = InMemoryNonceRegistry(clock::now)
         val expiry = T0.plus(Duration.ofMinutes(5))
 
-        assertTrue(nonces.register(DEVICE_A, "n", expiry))
-        assertFalse(nonces.register(DEVICE_A, "n", expiry))
-        assertTrue(nonces.register(DEVICE_B, "n", expiry))
+        assertTrue(nonces.register(DEVICE_A.value, "n", expiry))
+        assertFalse(nonces.register(DEVICE_A.value, "n", expiry))
+        assertTrue(nonces.register(DEVICE_B.value, "n", expiry))
 
         clock.advanceBy(Duration.ofMinutes(5))
-        assertTrue(nonces.register(DEVICE_A, "n", clock.now().plus(Duration.ofMinutes(5))))
+        assertTrue(nonces.register(DEVICE_A.value, "n", clock.now().plus(Duration.ofMinutes(5))))
     }
 
     @Test
@@ -34,15 +34,15 @@ class AuthTest {
         val soon = T0.plusSeconds(10)
         val later = T0.plus(Duration.ofMinutes(5))
 
-        assertTrue(nonces.register(DEVICE_A, "1", later))
-        assertTrue(nonces.register(DEVICE_A, "2", soon))
-        assertFalse(nonces.register(DEVICE_A, "3", later))
-        assertFalse(nonces.register(DEVICE_A, "1", later))
+        assertTrue(nonces.register(DEVICE_A.value, "1", later))
+        assertTrue(nonces.register(DEVICE_A.value, "2", soon))
+        assertFalse(nonces.register(DEVICE_A.value, "3", later))
+        assertFalse(nonces.register(DEVICE_A.value, "1", later))
 
         // Once one expires there is room again, and the other is still remembered.
         clock.advanceBy(Duration.ofSeconds(10))
-        assertTrue(nonces.register(DEVICE_A, "3", later))
-        assertFalse(nonces.register(DEVICE_A, "1", later))
+        assertTrue(nonces.register(DEVICE_A.value, "3", later))
+        assertFalse(nonces.register(DEVICE_A.value, "1", later))
     }
 
     @Test

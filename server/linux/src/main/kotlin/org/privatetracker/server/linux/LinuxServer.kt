@@ -17,12 +17,18 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.common.result.onSuccess
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceOverview
 import org.privatetracker.core.domain.model.DeviceStatus
+import org.privatetracker.core.domain.model.Peer
+import org.privatetracker.core.domain.model.RelayAddress
+import org.privatetracker.core.domain.model.RelayState
 import org.privatetracker.core.domain.model.WebAccount
+import org.privatetracker.core.domain.model.advertisedAddresses
 import org.privatetracker.core.domain.model.keyFingerprint
+import org.privatetracker.core.domain.model.normalizeFingerprint
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.protocol.v1.PairingUri
 import org.privatetracker.server.api.ServerDependencies
@@ -34,6 +40,7 @@ import org.privatetracker.server.linux.admin.AdminRequest
 import org.privatetracker.server.linux.admin.AdminServer
 import org.privatetracker.server.linux.admin.AlreadyRunningException
 import org.privatetracker.server.linux.admin.DeviceRow
+import org.privatetracker.server.linux.admin.PeerRow
 import org.privatetracker.server.linux.admin.UserRow
 import org.privatetracker.server.linux.keys.ReloadingKeyManager
 import org.privatetracker.server.linux.keys.commonName
@@ -42,12 +49,22 @@ import org.privatetracker.server.linux.platform.hostAddresses
 import org.privatetracker.server.linux.platform.inviteUrls
 import org.privatetracker.server.linux.platform.runsInContainer
 import org.privatetracker.server.netty.tlsServer
+import org.privatetracker.server.tunnel.RelayTunnel
+import org.privatetracker.server.tunnel.TunnelLog
+import org.privatetracker.server.tunnel.TunnelTarget
+import org.privatetracker.server.tunnel.TunnelVisitors
 import org.privatetracker.server.web.HostStatus
+import org.privatetracker.server.web.RelayView
 import org.privatetracker.server.web.WebCertificate
 import org.privatetracker.server.web.WebDependencies
 import org.privatetracker.server.web.WebPairing
+import org.privatetracker.server.web.WebPeerInvites
+import org.privatetracker.server.web.WebPeers
+import org.privatetracker.server.web.page.relayStateLabel
 import org.privatetracker.server.web.privateTrackerWeb
 import org.slf4j.LoggerFactory
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.cert.X509Certificate
 import java.time.Duration
 import java.time.Instant
@@ -55,6 +72,7 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.X509ExtendedKeyManager
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toKotlinDuration
 
 /**
@@ -62,7 +80,12 @@ import kotlin.time.toKotlinDuration
  * of its own, the admin socket for the command line, and the daily maintenance a phone leaves to
  * WorkManager. [stop] is what SIGTERM runs.
  */
-class LinuxServer(private val graph: ServerGraph, private val version: String) : AdminHandler {
+class LinuxServer(
+    private val graph: ServerGraph,
+    private val version: String,
+    /** How the tunnel reaches the relay: by its name, but in tests, where that resolves nowhere. */
+    private val relayDial: ((RelayAddress) -> Socket)? = null,
+) : AdminHandler {
     private val log = LoggerFactory.getLogger("Server")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val admin = AdminServer(graph.data.adminSocket, this)
@@ -72,6 +95,10 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
     @Volatile private var shuttingDown = false
     private var server: EmbeddedServer<*, *>? = null
     private var web: EmbeddedServer<*, *>? = null
+    private var tunnel: RelayTunnel? = null
+
+    /** Who the relay tunnel's connections carry, for the limits of both ports. */
+    private val visitors = TunnelVisitors()
     private var lock: AutoCloseable? = null
 
     /** What the web port presents now; the owner's PEM files may be renewed while the server runs. */
@@ -87,6 +114,7 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
         lock = graph.data.lock() ?: throw AlreadyRunningException(graph.data.adminSocket)
         try {
             admin.start()
+            graph.advertisedAddresses = ::advertisedUrls
             // Sessions a crash left open end at their last activity, not now.
             runBlocking { graph.closeInactiveSessions() }
             // Without its key the server has no TLS, and it never serves in the clear instead.
@@ -107,9 +135,14 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
                 isLocalRequest = { false },
                 isShuttingDown = { shuttingDown },
                 onRequest = { requests.incrementAndGet() },
+                advertisedAddresses = ::advertisedUrls,
+                tunneledVisitor = visitors::visitor,
+                acceptPeer = graph.acceptPeer,
+                answerPeerExchange = graph.answerPeerExchange,
             )
             server = tlsServer(config.port, config.bindAddress, keyManager) { privateTrackerApi(dependencies) }.start(wait = false)
             graph.settings.web?.let { settings -> web = startWeb(settings, keyManager) }
+            config.relay?.let { relay -> tunnel = startTunnel(relay, keyManager) }
         } catch (e: Throwable) {
             // Errors too: a native library that will not load must not leave the socket and the lock behind.
             server?.stop(0, 0)
@@ -118,9 +151,10 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
             throw e
         }
         scope.launch { maintain() }
+        scope.launch { syncPeers() }
         val fingerprint = runBlocking { graph.getServerKeyFingerprint() }
         log.info("PrivateTracker Server {} listening on {}:{}, key fingerprint {}", version, config.bindAddress, config.port, fingerprint)
-        val urls = currentInviteUrls()
+        val urls = runBlocking { advertisedUrls() }
         if (urls.isEmpty()) {
             log.warn("No address to give trackers: set PRIVATETRACKER_PUBLIC_URLS (or --public-url) to the URL phones can reach")
         } else {
@@ -173,9 +207,23 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
                 graph.observePairedDevice,
                 graph.withdrawPairingInvite,
                 graph.pairingTickets,
-                ::currentInviteUrls,
+                ::advertisedUrls,
                 graph.clock,
                 graph.background,
+            ),
+            peers = WebPeers(
+                invites = WebPeerInvites(
+                    graph.createPeerInvite,
+                    graph.observePeerJoined,
+                    graph.withdrawPeerInvite,
+                    graph.peerTickets,
+                    ::advertisedUrls,
+                    graph.clock,
+                    graph.background,
+                ),
+                list = { graph.peers.all() },
+                join = { invite -> graph.joinPeer(invite).onSuccess { firstExchange(it) } },
+                remove = { graph.removePeer(it) },
             ),
             getServerKeyFingerprint = graph.getServerKeyFingerprint,
             encryptionKeys = graph.encryptionKeys,
@@ -185,6 +233,8 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
             browserKey = graph.browserKey(),
             sendHsts = settings.certificate != null,
             isShuttingDown = { shuttingDown },
+            // Through the relay every browser arrives from this machine: each counts as the one the relay saw.
+            clientAddress = { call -> call.request.local.let { visitors.visitor(it.remoteAddress, it.remotePort) ?: it.remoteAddress } },
         )
         return tlsServer(settings.port, settings.bindAddress, keyManager) { privateTrackerWeb(dependencies) }.start(wait = false)
     }
@@ -196,7 +246,7 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
             trackerRequests = requests.get(),
             trackerPort = graph.settings.config.port,
             webPort = graph.settings.web?.port ?: 0,
-            inviteUrls = currentInviteUrls(),
+            inviteUrls = runBlocking { advertisedUrls() },
             certificate = WebCertificate(
                 fromFile = graph.settings.web?.certificate != null,
                 sha256 = certificate.sha256(),
@@ -205,8 +255,42 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
                 notAfter = certificate.notAfter.toInstant().takeIf { it.isBefore(Instant.parse("9000-01-01T00:00:00Z")) },
             ),
             webhook = graph.webhook?.status,
+            relay = graph.settings.config.relay?.let { RelayView(it.toString(), tunnel?.status?.value ?: RelayState.Off) },
         )
     }
+
+    /**
+     * The tunnel to the relay, so trackers reach this server from anywhere. The relay knows this server
+     * by the identity key, shown as TLS client certificate; trackers' connections arrive on the API port
+     * of this machine, and browsers' on the web port when the owner allowed that.
+     */
+    private fun startTunnel(relay: RelayAddress, keyManager: X509ExtendedKeyManager): RelayTunnel {
+        val config = graph.settings.config
+        val targets = buildMap {
+            put(TunnelTarget.API, InetSocketAddress(localHost(config.bindAddress), config.port))
+            val web = graph.settings.web
+            if (config.relayWeb && web != null) put(TunnelTarget.WEB, InetSocketAddress(localHost(web.bindAddress), web.port))
+        }
+        val tunnelLog = LoggerFactory.getLogger("Relay")
+        val tunnel = RelayTunnel(
+            relay = relay,
+            relayFingerprint = config.relayFingerprint,
+            serverFingerprint = checkNotNull(runBlocking { graph.getServerKeyFingerprint() }),
+            keyManager = keyManager,
+            targets = targets,
+            log = object : TunnelLog {
+                override fun info(message: String) = tunnelLog.info(message)
+                override fun warn(message: String, error: Throwable?) = tunnelLog.warn(message, error)
+            },
+            dial = relayDial ?: { Socket().apply { connect(InetSocketAddress(it.host, it.port), RELAY_CONNECT_MILLIS) } },
+            visitors = visitors,
+        )
+        tunnel.start(scope)
+        return tunnel
+    }
+
+    /** Where this machine reaches its own port bound to [bindAddress]. */
+    private fun localHost(bindAddress: String): String = if (bindAddress == "0.0.0.0" || bindAddress == "::") "127.0.0.1" else bindAddress
 
     /** Answers 503 during the grace period, so trackers keep their outbox, then closes every session. */
     fun stop() {
@@ -257,10 +341,31 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
         }
     }
 
+    /**
+     * Exchanges with the paired servers, from 1.0: checked every few seconds, while the use case skips
+     * any server exchanged with, either way, in the last minute.
+     */
+    private suspend fun syncPeers() {
+        while (true) {
+            delay(PEER_CHECK)
+            try {
+                graph.syncWithPeers()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.warn("Exchange with paired servers failed", e)
+            }
+        }
+    }
+
     private fun currentInviteUrls(): List<String> {
         val config = graph.settings.config
         return inviteUrls(graph.settings.publicUrls, config.port, config.bindAddress, runsInContainer(), hostAddresses())
     }
+
+    /** What invites carry and health signs: this machine's addresses, then the relay's name for it. */
+    private suspend fun advertisedUrls(): List<String> =
+        advertisedAddresses(currentInviteUrls(), graph.config.get(), graph.getServerKeyFingerprint())
 
     // The command line's requests.
 
@@ -301,8 +406,122 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
                     is Outcome.Failure -> AdminReply.Error(accountError(removed.error))
                 },
             )
+            AdminRequest.Peers -> connection.send(peers())
+            AdminRequest.PeerInvite -> peerInvite(connection)
+            is AdminRequest.PeerJoin -> connection.send(joinPeer(request.link))
+            is AdminRequest.PeerRemove -> connection.send(removePeer(request.peer))
         }
     }
+
+    // Paired servers, from 1.0.
+
+    private suspend fun peers() = AdminReply.Peers(graph.peers.all().map { it.toRow() })
+
+    private suspend fun joinPeer(link: String): AdminReply {
+        val invite = PairingUri.parse(link, PairingUri.PEER_HOST)
+            ?: return AdminReply.Error("Eso no es una invitación de servidor: empieza con privatetracker://peer?")
+        return when (val joined = graph.joinPeer(invite)) {
+            is Outcome.Success -> {
+                firstExchange(joined.value)
+                AdminReply.PeerJoined(joined.value.toRow())
+            }
+            is Outcome.Failure -> AdminReply.Error(peerError(joined.error))
+        }
+    }
+
+    /** The first exchange with a server just joined, now rather than in a minute. */
+    private fun firstExchange(peer: Peer) {
+        scope.launch { graph.exchangeWithPeer(peer.publicKey) }
+    }
+
+    private suspend fun removePeer(reference: String): AdminReply {
+        val wanted = reference.trim()
+        val all = graph.peers.all()
+        val matches = all.filter { it.name.equals(wanted, ignoreCase = true) || it.fingerprint.equals(normalizeFingerprint(wanted), ignoreCase = true) }
+        val peer = when (matches.size) {
+            1 -> matches.single()
+            0 -> return AdminReply.Error("No hay ningún servidor emparejado «$wanted». Mira la lista con: privatetracker-server peers")
+            else -> return AdminReply.Error("Hay varios servidores llamados «$wanted»; usa su huella")
+        }
+        graph.removePeer(peer.publicKey)
+        return peers()
+    }
+
+    private suspend fun peerInvite(connection: AdminConnection) {
+        val urls = advertisedUrls()
+        if (urls.isEmpty()) {
+            connection.send(AdminReply.Error("No hay ninguna dirección que dar al otro servidor; define PRIVATETRACKER_PUBLIC_URLS o un relay"))
+            return
+        }
+        val invite = when (val created = graph.createPeerInvite(urls)) {
+            is Outcome.Success -> created.value
+            is Outcome.Failure -> {
+                connection.send(AdminReply.Error("No se pudo crear la invitación: la clave del servidor no responde"))
+                return
+            }
+        }
+        connection.send(
+            AdminReply.Invite(
+                uri = PairingUri.format(invite, PairingUri.PEER_HOST),
+                urls = invite.serverUrls,
+                fingerprint = keyFingerprint(invite.serverKey),
+                expiresAtMillis = invite.expiresAt.toEpochMilli(),
+            ),
+        )
+        val hangUp = connection.hangUp()
+        val remaining = Duration.between(graph.clock.now(), invite.expiresAt).coerceAtLeast(Duration.ZERO).toKotlinDuration()
+        val joined = scope.async { withTimeoutOrNull(remaining) { graph.observePeerJoined(invite.ticketId).filterNotNull().first() } }
+        // Another invite, here or in the web app, withdraws this one: only one is open at a time.
+        val replaced = scope.async { graph.peerTickets.observe(invite.ticketId).first { it == null } }
+        val ending = try {
+            select<PeerInviteEnd> {
+                joined.onAwait { peer -> peer?.let(PeerInviteEnd::Joined) ?: PeerInviteEnd.Expired }
+                replaced.onAwait { PeerInviteEnd.Replaced }
+                hangUp.onAwait { PeerInviteEnd.HungUp }
+            }
+        } catch (e: Exception) {
+            // Failing or stopping: the invite must not stay valid with nobody watching it.
+            graph.withdrawPeerInvite(invite.ticketId)
+            throw e
+        } finally {
+            joined.cancel()
+            replaced.cancel()
+        }
+        when (ending) {
+            is PeerInviteEnd.Joined -> connection.send(AdminReply.PeerJoined(ending.peer.toRow()))
+            PeerInviteEnd.Expired -> {
+                graph.withdrawPeerInvite(invite.ticketId)
+                connection.send(AdminReply.Expired)
+            }
+            PeerInviteEnd.Replaced -> connection.send(AdminReply.Error("Otra invitación de servidor reemplazó a esta; ya no sirve."))
+            PeerInviteEnd.HungUp -> graph.withdrawPeerInvite(invite.ticketId)
+        }
+    }
+
+    private sealed interface PeerInviteEnd {
+        data class Joined(val peer: Peer) : PeerInviteEnd
+        data object Expired : PeerInviteEnd
+        data object Replaced : PeerInviteEnd
+        data object HungUp : PeerInviteEnd
+    }
+
+    private fun peerError(error: DomainError): String = when (error) {
+        DomainError.PairingInvalid -> "La invitación venció, ya la usó otro servidor o es de este mismo servidor. Pide una nueva."
+        DomainError.ServerIdentityMismatch -> "En esa dirección responde otro servidor, no el de la invitación."
+        is DomainError.Network -> "No se pudo llegar al otro servidor en ninguna de sus direcciones."
+        DomainError.DeviceKeyUnavailable -> "La clave de este servidor no responde."
+        is DomainError.Validation -> "El otro servidor rechazó la petición (${error.violations.joinToString { it.field }})."
+        else -> "No se pudo: ${error.code}"
+    }
+
+    private fun Peer.toRow() = PeerRow(
+        name = name,
+        fingerprint = fingerprint,
+        addresses = addresses,
+        pairedAtMillis = pairedAt.toEpochMilli(),
+        lastExchangeAtMillis = sync.lastExchangeAt?.toEpochMilli(),
+        lastError = sync.lastError,
+    )
 
     private suspend fun users() = AdminReply.Users(graph.listWebAccounts().map { UserRow(it.name, it.createdAt.toEpochMilli()) })
 
@@ -338,7 +557,7 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
             startedAtMillis = startedAt.toEpochMilli(),
             requests = requests.get(),
             fingerprint = graph.getServerKeyFingerprint(),
-            inviteUrls = currentInviteUrls(),
+            inviteUrls = advertisedUrls(),
             devices = overviews.size,
             pending = overviews.count { it.device.awaitsApproval },
             online = overviews.count { it.status == DeviceStatus.ONLINE },
@@ -347,6 +566,10 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
             webPort = graph.settings.web?.port,
             webCertificateSha256 = graph.settings.web?.let { runCatching { webCertificate().sha256() }.getOrNull() },
             webAccounts = graph.listWebAccounts().size,
+            relay = config.relay?.toString(),
+            relayState = config.relay?.let { relayStateLabel(tunnel?.status?.value ?: RelayState.Off) },
+            relayUrl = (tunnel?.status?.value as? RelayState.Connected)?.trackerUrl,
+            peers = graph.peers.all().size,
         )
     }
 
@@ -386,7 +609,7 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
      * register again; any other ending withdraws it.
      */
     private suspend fun pair(connection: AdminConnection) {
-        val urls = currentInviteUrls()
+        val urls = advertisedUrls()
         if (urls.isEmpty()) {
             val hint = if (runsInContainer()) {
                 "Dentro de un contenedor define PRIVATETRACKER_PUBLIC_URLS con la URL que ven los teléfonos, p. ej. https://192.168.1.20:8787"
@@ -492,3 +715,8 @@ class LinuxServer(private val graph: ServerGraph, private val version: String) :
         fingerprint = device.publicKey?.let(::keyFingerprint),
     )
 }
+
+private const val RELAY_CONNECT_MILLIS = 10_000
+
+/** How often the paired servers are looked at; each still gets about one exchange a minute. */
+private val PEER_CHECK = 15.seconds

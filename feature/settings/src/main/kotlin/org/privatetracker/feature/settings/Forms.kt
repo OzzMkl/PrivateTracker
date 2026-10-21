@@ -4,6 +4,7 @@ import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.domain.model.LocationPriority
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.TrackerConfig
+import org.privatetracker.core.domain.model.normalizeFingerprint
 
 // Editable copies of the settings. Numbers stay text while typed; field names match the domain validators.
 
@@ -74,6 +75,8 @@ data class ServerForm(
     val maxBatchSize: String,
     val exposeReadApi: Boolean,
     val advertiseOnLan: Boolean,
+    val relayAddress: String = "",
+    val relayFingerprint: String = "",
     val errors: Map<String, FieldViolation> = emptyMap(),
     val dirty: Boolean = false,
 ) {
@@ -90,6 +93,9 @@ data class ServerForm(
             maxBatchSize = numbers.int("maxBatchSize", maxBatchSize),
             exposeReadApi = exposeReadApi,
             advertiseOnLan = advertiseOnLan,
+            // Blank address: no relay, and no fingerprint left behind to confuse the next one.
+            relayAddress = relayAddress.trim().lowercase(),
+            relayFingerprint = if (relayAddress.isBlank()) "" else normalizeFingerprint(relayFingerprint),
         )
         return config to numbers.violations
     }
@@ -106,6 +112,8 @@ data class ServerForm(
             maxBatchSize = config.maxBatchSize.toString(),
             exposeReadApi = config.exposeReadApi,
             advertiseOnLan = config.advertiseOnLan,
+            relayAddress = config.relayAddress,
+            relayFingerprint = config.relayFingerprint,
         )
     }
 }

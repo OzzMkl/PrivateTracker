@@ -20,6 +20,7 @@ import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.domain.model.AddressKind
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.PairingInvite
+import org.privatetracker.core.domain.model.advertisedAddresses
 import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
 import org.privatetracker.core.domain.usecase.server.GetServerKeyFingerprint
 import org.privatetracker.core.domain.usecase.server.ObservePairedDevice
@@ -47,7 +48,7 @@ class PairingViewModel @Inject constructor(
     private val createInvite: CreatePairingInvite,
     private val withdrawInvite: WithdrawPairingInvite,
     observePaired: ObservePairedDevice,
-    getServerKeyFingerprint: GetServerKeyFingerprint,
+    private val getServerKeyFingerprint: GetServerKeyFingerprint,
 ) : ViewModel() {
     private val invite = MutableStateFlow<Outcome<PairingInvite>?>(null)
     private val fingerprint = MutableStateFlow<String?>(null)
@@ -79,9 +80,10 @@ class PairingViewModel @Inject constructor(
         renewing?.cancel()
         renewing = viewModelScope.launch {
             invite.value = null
-            // Loopback is useless to another phone and only makes the code denser.
+            val serverFingerprint = getServerKeyFingerprint()
+            // Loopback is useless to another phone and only makes the code denser. The relay, if any, goes last.
             val urls = observeStatus()
-                .map { status -> status.addresses.filter { it.kind != AddressKind.LOOPBACK }.map { it.url } }
+                .map { status -> advertisedAddresses(status.addresses.filter { it.kind != AddressKind.LOOPBACK }.map { it.url }, status.config, serverFingerprint) }
                 .first { it.isNotEmpty() }
             invite.value = createInvite(urls)
         }

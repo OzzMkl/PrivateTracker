@@ -12,12 +12,14 @@ import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsBytes
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CancellationException
+import kotlinx.io.readByteArray
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import org.privatetracker.core.common.result.DomainError
@@ -36,12 +38,12 @@ import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.DeviceKeys
 import org.privatetracker.core.domain.port.ServerGateway
+import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.mapper.toDomain
 import org.privatetracker.core.protocol.mapper.toDomainError
 import org.privatetracker.core.protocol.mapper.toDto
 import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.protocol.v1.ProtocolJson
-import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.v1.RequestSignature
 import org.privatetracker.core.protocol.v1.SealedBodies
 import org.privatetracker.core.protocol.v1.dto.HealthResponse
@@ -139,44 +141,56 @@ class KtorServerGateway(
         }
     }
 
-    /**
-     * [acknowledgedBy] checks a successful answer before it is believed; a failed check is a foreign
-     * server. [open] reads a sealed answer; one that does not open is no answer to this request.
-     */
     private suspend fun <T> exchange(
         deserializer: DeserializationStrategy<T>,
         acknowledgedBy: ((HttpResponse, ByteArray) -> Boolean)? = null,
         open: ((ByteArray) -> ByteArray?)? = null,
         request: suspend () -> HttpResponse,
-    ): Outcome<T> {
-        val (response, bytes) = try {
-            val response = request()
-            response to response.bodyAsBytes()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            return e.toDomainError().asFailure()
-        }
-        val body = bytes.decodeToString()
-
-        if (!response.status.isSuccess()) {
-            val problem = runCatching { ProtocolJson.decodeFromString(ProblemDetails.serializer(), body) }.getOrNull()
-            val retryAfter = response.headers[HttpHeaders.RetryAfter]?.toLongOrNull()
-            return problem.toDomainError(response.status.value, retryAfter).asFailure()
-        }
-        if (acknowledgedBy != null && !acknowledgedBy(response, bytes)) return DomainError.ServerIdentityMismatch.asFailure()
-        val plain = if (open == null) body else open(bytes)?.decodeToString()
-            ?: return DomainError.Network.InvalidResponse("sealed answer does not open").asFailure()
-        return try {
-            Outcome.Success(ProtocolJson.decodeFromString(deserializer, plain))
-        } catch (e: SerializationException) {
-            DomainError.Network.InvalidResponse(e.message?.lineSequence()?.firstOrNull() ?: "unreadable body").asFailure()
-        } catch (e: IllegalArgumentException) {
-            DomainError.Network.InvalidResponse(e.message?.lineSequence()?.firstOrNull() ?: "unreadable body").asFailure()
-        }
-    }
+    ): Outcome<T> = protocolExchange(deserializer, acknowledgedBy, open, request = request)
 
     private fun url(serverUrl: String, path: String) = serverUrl.trimEnd('/') + path
+}
+
+/**
+ * One request of protocol v1 and its answer, every expected failure as a [DomainError]. [acknowledgedBy]
+ * checks a successful answer before it is believed; a failed check is a foreign server. [open] reads
+ * a sealed answer; one that does not open is no answer to this request.
+ */
+internal suspend fun <T> protocolExchange(
+    deserializer: DeserializationStrategy<T>,
+    acknowledgedBy: ((HttpResponse, ByteArray) -> Boolean)? = null,
+    open: ((ByteArray) -> ByteArray?)? = null,
+    /** An answer longer than this is no answer of the protocol; it is not read to the end. */
+    maxBytes: Long = MAX_ANSWER_BYTES,
+    request: suspend () -> HttpResponse,
+): Outcome<T> {
+    val (response, bytes) = try {
+        val response = request()
+        val bytes = response.bodyAsChannel().readRemaining(maxBytes + 1).readByteArray()
+        if (bytes.size > maxBytes) return DomainError.Network.InvalidResponse("answer larger than $maxBytes bytes").asFailure()
+        response to bytes
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        return e.toDomainError().asFailure()
+    }
+    val body = bytes.decodeToString()
+
+    if (!response.status.isSuccess()) {
+        val problem = runCatching { ProtocolJson.decodeFromString(ProblemDetails.serializer(), body) }.getOrNull()
+        val retryAfter = response.headers[HttpHeaders.RetryAfter]?.toLongOrNull()
+        return problem.toDomainError(response.status.value, retryAfter).asFailure()
+    }
+    if (acknowledgedBy != null && !acknowledgedBy(response, bytes)) return DomainError.ServerIdentityMismatch.asFailure()
+    val plain = if (open == null) body else open(bytes)?.decodeToString()
+        ?: return DomainError.Network.InvalidResponse("sealed answer does not open").asFailure()
+    return try {
+        Outcome.Success(ProtocolJson.decodeFromString(deserializer, plain))
+    } catch (e: SerializationException) {
+        DomainError.Network.InvalidResponse(e.message?.lineSequence()?.firstOrNull() ?: "unreadable body").asFailure()
+    } catch (e: IllegalArgumentException) {
+        DomainError.Network.InvalidResponse(e.message?.lineSequence()?.firstOrNull() ?: "unreadable body").asFailure()
+    }
 }
 
 /**
@@ -200,6 +214,9 @@ internal fun Throwable.toDomainError(): DomainError = when {
 private fun Throwable.causes(): Sequence<Throwable> = generateSequence(this) { it.cause?.takeIf { cause -> cause !== it } }.take(MAX_CAUSES)
 
 private const val MAX_CAUSES = 16
+
+/** Larger than any answer of protocol v1, a batch between servers included. */
+internal const val MAX_ANSWER_BYTES: Long = ApiV1.MAX_SYNC_BODY_BYTES.toLong()
 
 /** HTTP client configured for the protocol: no exceptions on error statuses, bounded timeouts, own User-Agent. */
 fun createProtocolHttpClient(engine: HttpClientEngine, userAgent: String): HttpClient = HttpClient(engine) {

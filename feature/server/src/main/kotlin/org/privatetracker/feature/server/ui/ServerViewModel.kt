@@ -19,6 +19,7 @@ import org.privatetracker.core.domain.model.ServerStatus
 import org.privatetracker.core.domain.usecase.server.GetServerKeyFingerprint
 import org.privatetracker.core.domain.usecase.server.ObserveDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.ObserveEncryptionKey
+import org.privatetracker.core.domain.usecase.server.ObservePeers
 import org.privatetracker.core.domain.usecase.server.ObserveServerStatus
 import org.privatetracker.core.domain.usecase.server.RotateEncryptionKey
 import org.privatetracker.core.domain.usecase.server.StartServer
@@ -39,6 +40,8 @@ data class ServerUiState(
     val encryptionKey: EncryptionKey? = null,
     /** Why the last rotation failed. */
     val rotateError: DomainError? = null,
+    /** Servers this one shares with (1.0). */
+    val peerCount: Int = 0,
 )
 
 @HiltViewModel
@@ -47,6 +50,7 @@ class ServerViewModel @Inject constructor(
     observeDevices: ObserveDeviceOverviews,
     getServerKeyFingerprint: GetServerKeyFingerprint,
     observeEncryptionKey: ObserveEncryptionKey,
+    observePeers: ObservePeers,
     private val rotateEncryptionKey: RotateEncryptionKey,
     private val startServer: StartServer,
     private val stopServer: StopServer,
@@ -57,7 +61,7 @@ class ServerViewModel @Inject constructor(
     private val keys = combine(fingerprint, observeEncryptionKey().onStart { emit(null) }, rotateError, ::Keys)
 
     val state: StateFlow<ServerUiState> =
-        combine(observeStatus(), observeDevices(), startError, keys) { status, devices, error, keys ->
+        combine(observeStatus(), observeDevices(), startError, keys, observePeers()) { status, devices, error, keys, peers ->
             ServerUiState(
                 status = status,
                 deviceCount = devices.size,
@@ -66,6 +70,7 @@ class ServerViewModel @Inject constructor(
                 serverKeyFingerprint = keys.fingerprint,
                 encryptionKey = keys.encryptionKey,
                 rotateError = keys.rotateError,
+                peerCount = peers.size,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServerUiState())
 

@@ -14,7 +14,7 @@ import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.StoredEncryptionKey
 import org.privatetracker.core.domain.repository.EncryptionKeyRepository
 import org.privatetracker.core.domain.repository.ServerConfigRepository
-import org.privatetracker.server.linux.writeAtomically
+import org.privatetracker.server.hostkeys.writeAtomically
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant

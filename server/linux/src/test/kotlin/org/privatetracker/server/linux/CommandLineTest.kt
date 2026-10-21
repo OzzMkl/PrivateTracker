@@ -7,6 +7,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeReader
 import org.junit.jupiter.api.Test
 import org.privatetracker.core.domain.model.NetworkAddress
+import org.privatetracker.core.domain.model.RelayAddress
 import org.privatetracker.server.linux.keys.PemFiles
 import org.privatetracker.server.linux.platform.AlertWebhook
 import org.privatetracker.server.linux.platform.WebhookFormat
@@ -105,6 +106,22 @@ class CommandLineTest {
         assertEquals("abc", gotify.token)
         val target = AlertWebhook(gotify, "Casa", kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined), org.privatetracker.core.common.time.Clock.System).target
         assertEquals("https://gotify.casa.lan", target)
+    }
+
+    @Test
+    fun `a relay is set by name and fingerprint, and its web app only with a web app to offer`() {
+        val settings = serveSettings(
+            Arguments.parse(listOf("serve", "--relay", "Relay.Example.org:8443", "--relay-web", "true")),
+            mapOf("PRIVATETRACKER_RELAY_FINGERPRINT" to "9e9d 7678 d67d f283"),
+        )
+        assertEquals(RelayAddress("relay.example.org", 8443), settings.config.relay)
+        assertEquals("9E9D-7678-D67D-F283", settings.config.relayFingerprint)
+        assertTrue(settings.config.relayWeb)
+
+        fun refused(vararg args: String) = assertFailsWith<UsageException> { serveSettings(Arguments.parse(listOf("serve", *args)), emptyMap()) }.message!!
+        assertTrue("--relay-fingerprint" in refused("--relay", "relay.example.org"))
+        assertTrue("--relay" in refused("--relay", "203.0.113.7", "--relay-fingerprint", "9E9D-7678-D67D-F283"))
+        assertTrue("--relay-web" in refused("--relay", "relay.example.org", "--relay-fingerprint", "9E9D-7678-D67D-F283", "--relay-web", "true", "--web-port", "0"))
     }
 
     @Test

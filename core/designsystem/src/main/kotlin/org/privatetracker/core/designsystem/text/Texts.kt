@@ -50,6 +50,8 @@ fun DomainError.message(): String = when (this) {
     is DomainError.ServerStartFailed -> stringResource(R.string.error_server_start_failed, detail)
     // Only the web app of a Linux server signs anyone in; the phone never shows these.
     DomainError.SignInFailed, is DomainError.TooManyAttempts, DomainError.WebAccountNotFound -> code
+    DomainError.PeerUnknown -> stringResource(R.string.error_peer_unknown)
+    DomainError.PeerNotFound -> stringResource(R.string.error_peer_not_found)
 }
 
 /** Short name of a permission, from its domain name (AppPermission.name). */

@@ -62,6 +62,10 @@
     <string name="server_advertise_body">Los teléfonos emparejados encuentran el servidor aunque cambie su IP. Apágalo si prefieres que otros en tu Wi-Fi no vean que hay un servidor PrivateTracker.</string>
     <string name="server_expose_read">Permitir consultas desde la red</string>
     <string name="server_expose_read_body">Cualquiera en tu red podría ver las ubicaciones. Déjalo apagado salvo que lo necesites.</string>
+    <string name="settings_relay_title">Relay (opcional)</string>
+    <string name="settings_relay_body">Para que los Trackers lleguen a este teléfono desde fuera de casa sin abrir puertos. El relay es un programa aparte, en un VPS con dominio: su dueño te da su nombre y su huella, y agrega la huella de este servidor a su lista.</string>
+    <string name="settings_relay_address">Nombre del relay, p. ej. relay.example.org</string>
+    <string name="settings_relay_fingerprint">Huella del relay</string>
     <string name="server_restart_needed">El cambio de puerto o interfaz se aplica al reiniciar el servidor.</string>
     <string name="server_restart">Reiniciar</string>
 

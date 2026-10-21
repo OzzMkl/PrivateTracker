@@ -1,0 +1,12 @@
+{
+  "device_id": "6f1c2a8e-3b7d-4c1e-9a52-0d8e7f4b9c21",
+  "name": "Pixel de Ana",
+  "platform": "ANDROID",
+  "app_version": "1.0.0",
+  "protocol_version": 1,
+  "public_key": "ZGV2aWNlLWtleQ==",
+  "pairing": {
+    "ticket": "t1",
+    "proof": "cHJvb2Y="
+  }
+}

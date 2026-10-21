@@ -1,6 +1,8 @@
 package org.privatetracker.server.linux.keys
 
 import org.privatetracker.core.domain.port.DeviceKeyException
+import org.privatetracker.server.hostkeys.Pkcs12
+import org.privatetracker.server.hostkeys.guarded
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import java.net.Socket

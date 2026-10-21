@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.privatetracker.core.domain.model.RelayState
 import org.privatetracker.core.domain.model.ServerActivity
 import org.privatetracker.core.domain.model.ServerRunState
 import org.privatetracker.core.domain.port.ServerController
@@ -31,7 +32,11 @@ class ServiceServerController @Inject constructor(
 
     internal fun update(state: ServerRunState) {
         if (state == ServerRunState.Starting) requests.set(0)
-        _activity.value = ServerActivity(state, requests.get())
+        _activity.update { it.copy(state = state, requestsServed = requests.get()) }
+    }
+
+    internal fun updateRelay(relay: RelayState) {
+        _activity.update { it.copy(relay = relay) }
     }
 
     internal fun countRequest() {

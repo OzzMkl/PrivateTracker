@@ -12,6 +12,8 @@ import io.ktor.server.routing.routing
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.repository.ServerConfigRepository
+import org.privatetracker.core.domain.usecase.server.AcceptPeer
+import org.privatetracker.core.domain.usecase.server.AnswerPeerExchange
 import org.privatetracker.core.domain.usecase.server.AuthenticateDevice
 import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
 import org.privatetracker.core.domain.usecase.server.GetDeviceDetail
@@ -22,12 +24,16 @@ import org.privatetracker.core.protocol.v1.ErrorCode
 import org.privatetracker.core.protocol.v1.ProtocolJson
 import org.privatetracker.server.api.plugin.ApiException
 import org.privatetracker.server.api.plugin.DEVICE_RATE_LIMIT
+import org.privatetracker.server.api.plugin.HEALTH_RATE_LIMIT
+import org.privatetracker.server.api.plugin.PEER_RATE_LIMIT
 import org.privatetracker.server.api.plugin.installProblemResponses
 import org.privatetracker.server.api.plugin.installRateLimiting
 import org.privatetracker.server.api.plugin.isLoopback
 import org.privatetracker.server.api.route.deviceRoutes
 import org.privatetracker.server.api.route.healthRoutes
 import org.privatetracker.server.api.route.locationRoutes
+import org.privatetracker.server.api.route.peerJoinRoutes
+import org.privatetracker.server.api.route.syncRoutes
 
 /** Everything the HTTP layer needs, passed by constructor so this module stays free of any DI framework. */
 class ServerDependencies(
@@ -50,6 +56,21 @@ class ServerDependencies(
     val isShuttingDown: () -> Boolean = { false },
     /** Called once per request, answered or refused, for the request count on the server screen. */
     val onRequest: () -> Unit = {},
+    /**
+     * From 1.0: where trackers can reach this server now, its own addresses and its relay's name for
+     * it. Signed into every answer to a challenge, so paired trackers learn new ones.
+     */
+    val advertisedAddresses: suspend () -> List<String> = { emptyList() },
+    /**
+     * From 1.0: given a connection's remote address and port, the visitor a relay tunnel brought in on
+     * it (the address the relay saw), or null for a connection of anyone else. Such a connection comes
+     * from this machine but never counts as local, and its limits count against the visitor.
+     */
+    val tunneledVisitor: (address: String, port: Int) -> String? = { _, _ -> null },
+    /** From 1.0: servers that read this one's invite join with it; without it, no other server can. */
+    val acceptPeer: AcceptPeer? = null,
+    /** From 1.0: paired servers' exchanges; without it, they get 404. */
+    val answerPeerExchange: AnswerPeerExchange? = null,
 )
 
 /** Installs protocol v1 on an engine-agnostic Ktor [Application]. */
@@ -66,11 +87,17 @@ fun Application.privateTrackerApi(deps: ServerDependencies) {
             }
         },
     )
-    installRateLimiting(deps.requestsPerMinute)
+    installRateLimiting(deps)
 
     routing {
-        healthRoutes(deps)
+        rateLimit(HEALTH_RATE_LIMIT) {
+            healthRoutes(deps)
+        }
+        rateLimit(PEER_RATE_LIMIT) {
+            syncRoutes(deps)
+        }
         rateLimit(DEVICE_RATE_LIMIT) {
+            peerJoinRoutes(deps)
             deviceRoutes(deps)
             locationRoutes(deps)
         }

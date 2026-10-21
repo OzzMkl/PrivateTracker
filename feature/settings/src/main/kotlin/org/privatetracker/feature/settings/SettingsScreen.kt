@@ -385,6 +385,27 @@ private fun ServerSection(form: ServerForm, restartNeeded: Boolean, restarting: 
             checked = form.exposeReadApi,
             onCheckedChange = { value -> change { it.copy(exposeReadApi = value) } },
         )
+        Text(stringResource(R.string.settings_relay_title), style = MaterialTheme.typography.titleSmall)
+        Text(
+            stringResource(R.string.settings_relay_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FormField(
+            value = form.relayAddress,
+            onValueChange = { value -> change { it.copy(relayAddress = value) } },
+            label = stringResource(R.string.settings_relay_address),
+            error = form.errors["relayAddress"],
+            keyboardType = KeyboardType.Uri,
+        )
+        if (form.relayAddress.isNotBlank()) {
+            FormField(
+                value = form.relayFingerprint,
+                onValueChange = { value -> change { it.copy(relayFingerprint = value) } },
+                label = stringResource(R.string.settings_relay_fingerprint),
+                error = form.errors["relayFingerprint"],
+            )
+        }
         if (restartNeeded) {
             Notice(
                 text = stringResource(R.string.server_restart_needed),

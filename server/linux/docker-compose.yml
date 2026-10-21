@@ -25,6 +25,9 @@ services:
       # PRIVATETRACKER_WEB_KEY: "/certs/casa.tail1234.ts.net.key"
       # Geofence alerts with every page closed: an ntfy topic, Gotify, Home Assistant...
       # PRIVATETRACKER_ALERT_WEBHOOK: "https://ntfy.example.org/casa-alertas"
+      # Reachable from anywhere without opening ports: a privatetracker-relay on a VPS (see ../relay).
+      # PRIVATETRACKER_RELAY: "relay.example.org"
+      # PRIVATETRACKER_RELAY_FINGERPRINT: "1A2B-3C4D-5E6F-7A8B"
     volumes:
       - privatetracker-data:/data
       # - ./certs:/certs:ro

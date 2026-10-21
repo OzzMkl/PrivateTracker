@@ -24,8 +24,12 @@ data class StoredEncryptionKey(
     val protectedPrivateKey: String,
 )
 
-/** The tracker's copy of its server's encryption key, and the identity key that vouched for it. */
-data class TrustedEncryptionKey(val key: EncryptionKey, val serverKey: String)
+/**
+ * The tracker's copy of its server's encryption key, the identity key that vouched for it, and when the
+ * server last proved itself (null: before 1.0 kept it), after which the tracker asks again now and then
+ * for news such as new addresses.
+ */
+data class TrustedEncryptionKey(val key: EncryptionKey, val serverKey: String, val verifiedAt: Instant? = null)
 
 /**
  * How long the server's encryption keys live. A key is offered to trackers for a week; the server

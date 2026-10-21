@@ -1,0 +1,17 @@
+{
+  "locations": [
+    {
+      "id": "b3e1f7a2-5c4d-4e8f-a1b2-000000000001",
+      "latitude": 19.4326,
+      "longitude": -99.1332,
+      "accuracy_m": 8.5,
+      "altitude_m": 2240.0,
+      "speed_mps": 1.25,
+      "bearing_deg": 90.0,
+      "provider": "gps",
+      "battery_pct": 80,
+      "is_mock": false,
+      "recorded_at": "2026-10-16T17:59:00Z"
+    }
+  ]
+}

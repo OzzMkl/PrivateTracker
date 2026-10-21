@@ -6,6 +6,8 @@ import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.common.result.asSuccess
+import org.privatetracker.core.common.result.getOrNull
+import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceDetail
 import org.privatetracker.core.domain.model.DeviceId
@@ -16,20 +18,30 @@ import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationId
+import org.privatetracker.core.domain.model.MAX_ADVERTISED_ADDRESSES
 import org.privatetracker.core.domain.model.PairingClaim
+import org.privatetracker.core.domain.model.PeerJoin
+import org.privatetracker.core.domain.model.PeerWelcome
 import org.privatetracker.core.domain.model.Platform
 import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.RejectedLocation
 import org.privatetracker.core.domain.model.RejectionReason
+import org.privatetracker.core.domain.model.RemovedDevice
 import org.privatetracker.core.domain.model.ServerIdentity
 import org.privatetracker.core.domain.model.ServerInfo
 import org.privatetracker.core.domain.model.SignedEncryptionKey
+import org.privatetracker.core.domain.model.SyncBatch
+import org.privatetracker.core.domain.model.SyncCursor
 import org.privatetracker.core.domain.model.keyFingerprint
+import org.privatetracker.core.domain.validation.validateDeviceName
+import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.protocol.v1.ErrorCode
 import org.privatetracker.core.protocol.v1.dto.DeviceDetailDto
 import org.privatetracker.core.protocol.v1.dto.DeviceSummaryDto
 import org.privatetracker.core.protocol.v1.dto.EncryptionKeyDto
 import org.privatetracker.core.protocol.v1.dto.HealthResponse
+import org.privatetracker.core.protocol.v1.dto.JoinPeerRequest
+import org.privatetracker.core.protocol.v1.dto.JoinPeerResponse
 import org.privatetracker.core.protocol.v1.dto.LocationBatchResponse
 import org.privatetracker.core.protocol.v1.dto.LocationDto
 import org.privatetracker.core.protocol.v1.dto.PairingClaimDto
@@ -37,7 +49,12 @@ import org.privatetracker.core.protocol.v1.dto.ProblemDetails
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceRequest
 import org.privatetracker.core.protocol.v1.dto.RegisterDeviceResponse
 import org.privatetracker.core.protocol.v1.dto.RejectedLocationDto
+import org.privatetracker.core.protocol.v1.dto.RemovedDeviceDto
 import org.privatetracker.core.protocol.v1.dto.SessionDto
+import org.privatetracker.core.protocol.v1.dto.SyncCursorDto
+import org.privatetracker.core.protocol.v1.dto.SyncDeviceDto
+import org.privatetracker.core.protocol.v1.dto.SyncLocationDto
+import org.privatetracker.core.protocol.v1.dto.SyncMessageDto
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -141,13 +158,21 @@ fun RegisterDeviceResponse.toDomain(): Outcome<RegistrationResult> {
 
 // Health
 
-fun ServerInfo.toDto(): HealthResponse = HealthResponse(
-    "ok", name, version, protocolVersion, WireTime.format(serverTime), identity?.publicKey, identity?.signature, encryptionKey?.toDto(),
-)
+fun ServerInfo.toDto(): HealthResponse {
+    val signed = identity?.takeIf { it.addressesSignature != null }
+    return HealthResponse(
+        "ok", name, version, protocolVersion, WireTime.format(serverTime), identity?.publicKey, identity?.signature, encryptionKey?.toDto(),
+        signed?.addresses, signed?.addressesSignature,
+    )
+}
 
 fun HealthResponse.toDomain(): Outcome<ServerInfo> {
     val time = WireTime.parse(serverTime) ?: return invalid("server_time")
-    val identity = if (serverKey != null && signature != null) ServerIdentity(serverKey, signature) else null
+    val identity = if (serverKey != null && signature != null) {
+        ServerIdentity(serverKey, signature, addresses.orEmpty(), addressesSignature)
+    } else {
+        null
+    }
     val encryption = encryptionKey?.let { dto ->
         val useUntil = WireTime.parse(dto.useUntil) ?: return invalid("encryption_key.use_until")
         SignedEncryptionKey(EncryptionKey(dto.id, dto.publicKey, useUntil), dto.signature)
@@ -185,6 +210,117 @@ fun DeviceDetail.toDto(): DeviceDetailDto = DeviceDetailDto(
 fun DeviceSession.toDto(): SessionDto =
     SessionDto(WireTime.format(startedAt), WireTime.format(lastActivityAt), locationsReceived)
 
+// Paired servers, from 1.0 on
+
+fun PeerJoin.toDto(): JoinPeerRequest = JoinPeerRequest(ticketId, serverName, publicKey, addresses, proof)
+
+fun JoinPeerRequest.toDomain(): PeerJoin = PeerJoin(ticket, name, publicKey, addresses.take(MAX_ADVERTISED_ADDRESSES * 2), proof)
+
+fun PeerWelcome.toDto(): JoinPeerResponse = JoinPeerResponse(serverName, addresses)
+
+fun JoinPeerResponse.toDomain(): PeerWelcome = PeerWelcome(name, addresses.take(MAX_ADVERTISED_ADDRESSES * 2))
+
+fun SyncBatch.toDto(): SyncMessageDto = SyncMessageDto(
+    serverName = serverName,
+    addresses = addresses,
+    have = have.toDto(),
+    upTo = upTo.toDto(),
+    devices = devices.map { it.toSyncDto() },
+    removedDevices = removedDevices.map { RemovedDeviceDto(it.id.value, WireTime.format(it.removedAt)) },
+    locations = locations.map { it.toSyncDto() },
+    more = more,
+    reset = reset,
+)
+
+private fun SyncCursor.toDto() = SyncCursorDto(locations, devices)
+
+private fun SyncCursorDto.toDomain() = SyncCursor(locations, devices)
+
+private fun Device.toSyncDto() = SyncDeviceDto(
+    deviceId = id.value,
+    name = name,
+    platform = platform.name,
+    appVersion = appVersion,
+    protocolVersion = protocolVersion,
+    publicKey = publicKey,
+    approval = approval.name,
+    createdAt = WireTime.format(createdAt),
+    updatedAt = updatedAt?.let(WireTime::format),
+    approvalChangedAt = approvalChangedAt?.let(WireTime::format),
+    lastSeenAt = lastSeenAt?.let(WireTime::format),
+)
+
+private fun Location.toSyncDto() = SyncLocationDto(
+    deviceId = deviceId.value,
+    id = id.value,
+    latitude = latitude,
+    longitude = longitude,
+    accuracyM = accuracyM,
+    altitudeM = altitudeM,
+    speedMps = speedMps,
+    bearingDeg = bearingDeg,
+    provider = provider,
+    batteryPct = batteryPct,
+    isMock = isMock,
+    recordedAt = WireTime.format(recordedAt),
+    receivedAt = WireTime.format(checkNotNull(receivedAt) { "A stored location has its arrival time" }),
+)
+
+/**
+ * The batch a paired server sent. What does not parse is left out rather than failing the batch: a
+ * newer server may send what this one cannot read yet, and the cursors still move on. Fails only
+ * when the batch is larger than any sender may make it.
+ */
+fun SyncMessageDto.toDomain(): Outcome<SyncBatch> {
+    if (locations.size > ApiV1.MAX_SYNC_LOCATIONS || devices.size > ApiV1.MAX_SYNC_DEVICES || removedDevices.size > ApiV1.MAX_SYNC_DEVICES) {
+        return DomainError.Validation("batch", FieldViolation.TOO_LONG).asFailure()
+    }
+    return SyncBatch(
+        serverName = serverName,
+        addresses = addresses.take(MAX_ADVERTISED_ADDRESSES * 2),
+        have = have.toDomain(),
+        upTo = upTo.toDomain(),
+        devices = devices.mapNotNull { it.toDomain() },
+        removedDevices = removedDevices.mapNotNull { dto ->
+            val id = DeviceId.parse(dto.deviceId) ?: return@mapNotNull null
+            WireTime.parse(dto.removedAt)?.let { RemovedDevice(id, it) }
+        },
+        locations = locations.mapNotNull { it.toDomain() },
+        more = more,
+        reset = reset,
+    ).asSuccess()
+}
+
+private fun SyncDeviceDto.toDomain(): Device? {
+    val id = DeviceId.parse(deviceId) ?: return null
+    val created = WireTime.parse(createdAt) ?: return null
+    if (validateDeviceName("name", name) != null) return null
+    return Device(
+        id = id,
+        name = name.trim(),
+        platform = Platform.parse(platform),
+        appVersion = appVersion?.take(APP_VERSION_MAX_LENGTH),
+        protocolVersion = protocolVersion,
+        createdAt = created,
+        lastSeenAt = lastSeenAt?.let(WireTime::parse),
+        publicKey = publicKey,
+        // An approval this version does not know refuses the device, as storage does.
+        approval = DeviceApproval.entries.firstOrNull { it.name == approval } ?: DeviceApproval.REJECTED,
+        updatedAt = updatedAt?.let(WireTime::parse),
+        approvalChangedAt = approvalChangedAt?.let(WireTime::parse),
+    )
+}
+
+private fun SyncLocationDto.toDomain(): Location? {
+    val device = DeviceId.parse(deviceId) ?: return null
+    val received = WireTime.parse(receivedAt) ?: return null
+    val location = LocationDto(id, latitude, longitude, accuracyM, altitudeM, speedMps, bearingDeg, provider, batteryPct, isMock, recordedAt)
+        .toDomain(device).getOrNull() ?: return null
+    return location.copy(receivedAt = received)
+}
+
+private const val APP_VERSION_MAX_LENGTH = 64
+
 // Errors
 
 /** Client side: turns a problem response into the domain error the use cases react to. */
@@ -197,6 +333,7 @@ fun ProblemDetails?.toDomainError(httpStatus: Int, retryAfterSeconds: Long?): Do
         ErrorCode.DEVICE_PENDING_APPROVAL -> DomainError.DevicePendingApproval
         ErrorCode.DEVICE_REJECTED -> DomainError.DeviceRejected
         ErrorCode.PAIRING_INVALID -> DomainError.PairingInvalid
+        ErrorCode.PEER_UNKNOWN -> DomainError.PeerUnknown
         ErrorCode.ENCRYPTION_KEY_UNKNOWN -> DomainError.EncryptionKeyUnknown
         else -> AuthFailure.entries.firstOrNull { it.code == this?.code }?.let(DomainError::AuthenticationFailed)
             ?: DomainError.Http(httpStatus, this?.code, retryAfterSeconds)

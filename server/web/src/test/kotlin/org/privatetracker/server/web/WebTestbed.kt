@@ -14,8 +14,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import org.privatetracker.core.common.result.DomainError
+import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.Location
+import org.privatetracker.core.domain.model.PairingInvite
+import org.privatetracker.core.domain.model.Peer
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.testing.FakeClock
 import org.privatetracker.core.domain.testing.FakeEncryptionKeyVault
@@ -25,6 +30,8 @@ import org.privatetracker.core.domain.testing.ImmediateTransactionRunner
 import org.privatetracker.core.domain.testing.InMemoryEncryptionKeyRepository
 import org.privatetracker.core.domain.testing.InMemoryGeofences
 import org.privatetracker.core.domain.testing.InMemoryPairingTickets
+import org.privatetracker.core.domain.testing.InMemoryPeerTickets
+import org.privatetracker.core.domain.testing.InMemoryPeers
 import org.privatetracker.core.domain.testing.InMemoryServerConfigRepository
 import org.privatetracker.core.domain.testing.InMemoryServerStore
 import org.privatetracker.core.domain.testing.InMemoryWebAccounts
@@ -34,6 +41,7 @@ import org.privatetracker.core.domain.testing.T0
 import org.privatetracker.core.domain.usecase.server.AuthenticateWebSession
 import org.privatetracker.core.domain.usecase.server.ChangeWebPassword
 import org.privatetracker.core.domain.usecase.server.CreatePairingInvite
+import org.privatetracker.core.domain.usecase.server.CreatePeerInvite
 import org.privatetracker.core.domain.usecase.server.CreateWebAccount
 import org.privatetracker.core.domain.usecase.server.DeleteGeofence
 import org.privatetracker.core.domain.usecase.server.EncryptionKeyRing
@@ -47,13 +55,16 @@ import org.privatetracker.core.domain.usecase.server.ObserveDeviceOverviews
 import org.privatetracker.core.domain.usecase.server.ObserveGeofenceEvents
 import org.privatetracker.core.domain.usecase.server.ObserveGeofences
 import org.privatetracker.core.domain.usecase.server.ObservePairedDevice
+import org.privatetracker.core.domain.usecase.server.ObservePeerJoined
 import org.privatetracker.core.domain.usecase.server.RemoveDevice
+import org.privatetracker.core.domain.usecase.server.RemovePeer
 import org.privatetracker.core.domain.usecase.server.RotateEncryptionKey
 import org.privatetracker.core.domain.usecase.server.SaveGeofence
 import org.privatetracker.core.domain.usecase.server.SetDeviceApproval
 import org.privatetracker.core.domain.usecase.server.SignIn
 import org.privatetracker.core.domain.usecase.server.SignOut
 import org.privatetracker.core.domain.usecase.server.WithdrawPairingInvite
+import org.privatetracker.core.domain.usecase.server.WithdrawPeerInvite
 import org.privatetracker.server.web.live.LiveAlerts
 import org.privatetracker.server.web.security.SESSION_COOKIE
 import kotlin.time.Duration.Companion.milliseconds
@@ -70,6 +81,10 @@ class WebTestbed(config: ServerConfig = ServerConfig(serverName = "Casa")) {
     val sessions = InMemoryWebSessions()
     val hasher = FakePasswordHasher()
     val tickets = InMemoryPairingTickets()
+    val peers = InMemoryPeers()
+    val peerTickets = InMemoryPeerTickets()
+    /** What joining another server answers. */
+    var joinAnswer: (PairingInvite) -> Outcome<Peer> = { DomainError.Network.Unreachable.asFailure() }
     val alerts = LiveAlerts()
     val scope = CoroutineScope(SupervisorJob())
     var inviteUrls = listOf("https://192.168.1.20:8787")
@@ -88,8 +103,8 @@ class WebTestbed(config: ServerConfig = ServerConfig(serverName = "Casa")) {
         listAccounts = ListWebAccounts(accounts),
         observeDeviceOverviews = ObserveDeviceOverviews(store, configRepository, clock),
         getDeviceOverviews = GetDeviceOverviews(store, configRepository, clock),
-        setDeviceApproval = SetDeviceApproval(store, ImmediateTransactionRunner),
-        removeDevice = RemoveDevice(store),
+        setDeviceApproval = SetDeviceApproval(store, ImmediateTransactionRunner, clock),
+        removeDevice = RemoveDevice(store, clock),
         getDeviceTrack = GetDeviceTrack(store, store),
         exportDeviceHistory = ExportDeviceHistory(store, store, clock),
         observeGeofences = ObserveGeofences(geofences),
@@ -106,6 +121,21 @@ class WebTestbed(config: ServerConfig = ServerConfig(serverName = "Casa")) {
             clock,
             scope,
             checkEvery = 50.milliseconds,
+        ),
+        peers = WebPeers(
+            invites = WebPeerInvites(
+                CreatePeerInvite(peerTickets, FakeServerKeys(), configRepository, clock),
+                ObservePeerJoined(peerTickets, peers),
+                WithdrawPeerInvite(peerTickets),
+                peerTickets,
+                { inviteUrls },
+                clock,
+                scope,
+                checkEvery = 50.milliseconds,
+            ),
+            list = { peers.all() },
+            join = { joinAnswer(it) },
+            remove = { RemovePeer(peers)(it) },
         ),
         getServerKeyFingerprint = GetServerKeyFingerprint(FakeServerKeys()),
         encryptionKeys = ring,

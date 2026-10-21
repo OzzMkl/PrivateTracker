@@ -34,10 +34,15 @@ include(":core:protocol")
 include(":core:network")
 include(":server:api")
 include(":server:netty")
+// Key files and owner-only files of a server process on a host: the Linux server and the relay (1.0).
+include(":server:hostkeys")
 // The server on a Linux host or in Docker (1.0): the same API, keys in files, run from the command line.
 include(":server:linux")
 // Its web app (1.0): pages made on the server, for any Ktor engine, like server:api.
 include(":server:web")
+// The relay (1.0): its tunnel's protocol and the client servers run, and the relay itself.
+include(":server:tunnel")
+include(":server:relay")
 
 // Android data layer.
 include(":core:database")

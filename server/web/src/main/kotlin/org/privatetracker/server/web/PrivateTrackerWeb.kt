@@ -4,7 +4,11 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.origin
 import io.ktor.server.routing.routing
+import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.time.Clock
+import org.privatetracker.core.domain.model.PairingInvite
+import org.privatetracker.core.domain.model.Peer
+import org.privatetracker.core.domain.model.RelayState
 import org.privatetracker.core.domain.repository.ServerConfigRepository
 import org.privatetracker.core.domain.usecase.server.AuthenticateWebSession
 import org.privatetracker.core.domain.usecase.server.ChangeWebPassword
@@ -35,6 +39,7 @@ import org.privatetracker.server.web.route.geofenceRoutes
 import org.privatetracker.server.web.route.historyRoutes
 import org.privatetracker.server.web.route.mapRoutes
 import org.privatetracker.server.web.route.pairingRoutes
+import org.privatetracker.server.web.route.peerRoutes
 import org.privatetracker.server.web.route.serverRoutes
 import org.privatetracker.server.web.route.signInRoutes
 import org.privatetracker.server.web.security.installErrorPages
@@ -68,6 +73,9 @@ data class WebCertificate(
 /** Where geofence alerts also go when no web app is open, and how the last try went. */
 data class WebhookStatus(val target: String, val lastSentAt: Instant?, val lastError: String?)
 
+/** The relay the server keeps a tunnel to, as `host[:port]`, and how the tunnel is doing. */
+data class RelayView(val address: String, val state: RelayState)
+
 /** What the web app shows about the host it runs on; the Linux server fills it in. */
 data class HostStatus(
     val startedAt: Instant,
@@ -77,6 +85,7 @@ data class HostStatus(
     val inviteUrls: List<String>,
     val certificate: WebCertificate,
     val webhook: WebhookStatus?,
+    val relay: RelayView? = null,
 )
 
 /**
@@ -123,8 +132,18 @@ class WebDependencies(
     val isShuttingDown: () -> Boolean = { false },
     /** The address a sign-in counts against. Without a proxy in front, the peer's own address. */
     val clientAddress: (ApplicationCall) -> String? = { it.request.origin.remoteAddress },
+    /** Paired servers (1.0); null where the host shares with none. */
+    val peers: WebPeers? = null,
     /** How often the live stream says it is alive and checks that its session still is. */
     val liveHeartbeat: kotlin.time.Duration = 15.seconds,
+)
+
+/** What the web app does with paired servers (1.0). */
+class WebPeers(
+    val invites: WebInvites<Peer>,
+    val list: suspend () -> List<Peer>,
+    val join: suspend (PairingInvite) -> Outcome<Peer>,
+    val remove: suspend (publicKey: String) -> Outcome<Unit>,
 )
 
 /** Installs the web app on an engine-agnostic Ktor [Application]. */
@@ -139,6 +158,7 @@ fun Application.privateTrackerWeb(deps: WebDependencies) {
         deviceRoutes(deps, assets)
         historyRoutes(deps, assets)
         pairingRoutes(deps, assets)
+        peerRoutes(deps, assets)
         geofenceRoutes(deps, assets)
         serverRoutes(deps, assets)
         accountRoutes(deps, assets)

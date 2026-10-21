@@ -10,6 +10,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
+import org.privatetracker.server.hostkeys.OwnerOnly
 import org.privatetracker.server.linux.DataDirectory
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
@@ -73,7 +74,8 @@ class AdminConnection internal constructor(private val lines: LineChannel, priva
         val done = CompletableDeferred<Unit>()
         scope.launch {
             try {
-                while (lines.readLine() != null) Unit
+                // Whatever it says now is ignored; only the end of the stream counts.
+                while (true) lines.readLine() ?: break
             } catch (e: IOException) {
                 // Closed under the reader: the conversation is over either way.
             }
@@ -107,7 +109,7 @@ class AdminServer(private val socket: Path, private val handler: AdminHandler) {
         }
         val channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
         channel.bind(UnixDomainSocketAddress.of(socket))
-        Files.setPosixFilePermissions(socket, DataDirectory.OWNER_ONLY_FILE)
+        Files.setPosixFilePermissions(socket, OwnerOnly.FILE)
         server = channel
         scope.launch { accept(channel) }
     }

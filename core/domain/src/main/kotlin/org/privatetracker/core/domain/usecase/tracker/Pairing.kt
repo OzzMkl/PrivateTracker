@@ -9,26 +9,30 @@ import org.privatetracker.core.common.result.map
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.EncryptionKey
+import org.privatetracker.core.domain.model.MAX_ADVERTISED_ADDRESSES
 import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.TrustedEncryptionKey
 import org.privatetracker.core.domain.model.encryptionKeyInput
+import org.privatetracker.core.domain.model.serverAddressesInput
 import org.privatetracker.core.domain.model.serverIdentityInput
 import org.privatetracker.core.domain.port.ServerDiscovery
 import org.privatetracker.core.domain.port.ServerGateway
 import org.privatetracker.core.domain.port.SignatureVerifier
 import org.privatetracker.core.domain.repository.TrackerConfigRepository
 import org.privatetracker.core.domain.repository.TrackerStateRepository
+import org.privatetracker.core.domain.validation.TrackerConfigValidator
 import java.security.SecureRandom
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
 
 /**
- * What a server proved about itself: the identity key it holds, and the encryption key that identity
- * key vouches for. Servers before 0.5 offer no [encryptionKey].
+ * What a server proved about itself: the identity key it holds, the encryption key that identity key
+ * vouches for, and the addresses it signed for in that answer. Servers before 0.5 offer no
+ * [encryptionKey]; before 1.0, no [addresses].
  */
-data class VerifiedServer(val publicKey: String, val encryptionKey: EncryptionKey?)
+data class VerifiedServer(val publicKey: String, val encryptionKey: EncryptionKey?, val addresses: List<String> = emptyList())
 
 /**
  * Asks the server at [invoke]'s url to sign a fresh challenge and checks the answer against what this
@@ -55,14 +59,22 @@ class VerifyServerIdentity(
                 if (key == null || signature == null || !verifier.verify(key, input, signature)) {
                     return DomainError.ServerIdentityMismatch.asFailure()
                 }
-                if (encryption == null) return VerifiedServer(key, null).asSuccess()
+                val addresses = info.identity.addressesSignature?.let { signed ->
+                    val listed = info.identity.addresses
+                    val valid = decodeOrNull(signed)?.let { verifier.verify(key, serverAddressesInput(challenge, listed), it) } == true
+                    // Addresses someone slipped in are no mistake to shrug off.
+                    if (!valid) return DomainError.ServerIdentityMismatch.asFailure()
+                    listed.map(TrackerConfigValidator::normalizeServerUrl).filter { TrackerConfigValidator.validateServerUrl(it) == null }
+                        .distinct().take(MAX_ADVERTISED_ADDRESSES)
+                }.orEmpty()
+                if (encryption == null) return VerifiedServer(key, null, addresses).asSuccess()
                 // An encryption key the identity key did not sign could be anyone's: nothing gets sealed for it.
                 val vouched = encryption.signature.let(::decodeOrNull)?.let { verifier.verify(key, encryptionKeyInput(encryption.key), it) } == true
                 when {
                     !vouched -> DomainError.ServerIdentityMismatch.asFailure()
                     // The server never offers a key past its end; one that is would be sealed for nothing.
                     !info.serverTime.isBefore(encryption.key.useUntil) -> DomainError.EncryptionUnavailable.asFailure()
-                    else -> VerifiedServer(key, encryption.key).asSuccess()
+                    else -> VerifiedServer(key, encryption.key, addresses).asSuccess()
                 }
             }
         }
@@ -80,26 +92,63 @@ class VerifyServerIdentity(
  * serves and was vouched for by the server it trusts now; otherwise the server's current one, which
  * the server must sign with the key the tracker trusts. Keys rotate weekly, or when the server's owner
  * says so; [refresh] skips the remembered key after the server said it no longer has it.
+ *
+ * From 1.0 the server proves itself again at least once a [RECHECK_AFTER], and the addresses it signs
+ * for then replace the ones this tracker knows ([trackerConfig]; the simulator keeps none). That is how
+ * a tracker paired at home learns the relay before it leaves. A check that fails then is no failure:
+ * the remembered key still serves.
  */
 class GetServerEncryptionKey(
     private val trackerState: TrackerStateRepository,
     private val verifyServer: VerifyServerIdentity,
     private val clock: Clock,
+    private val trackerConfig: TrackerConfigRepository? = null,
 ) {
     suspend operator fun invoke(serverUrl: String, pin: ServerPin, refresh: Boolean = false): Outcome<EncryptionKey> {
-        if (!refresh) {
-            trackerState.encryptionKey()
-                ?.takeIf { pin.matches(it.serverKey) && clock.now().isBefore(it.key.useUntil) }
-                ?.let { return it.key.asSuccess() }
+        val now = clock.now()
+        val remembered = trackerState.encryptionKey()?.takeIf { pin.matches(it.serverKey) && now.isBefore(it.key.useUntil) }
+        if (!refresh && remembered != null) {
+            val checked = remembered.verifiedAt
+            if (checked != null && Duration.between(checked, now) < RECHECK_AFTER) return remembered.key.asSuccess()
+            // Due for news; without an answer, what is remembered still serves.
+            return when (val fresh = verifyServer(serverUrl, pin).flatMap { remember(it) }) {
+                is Outcome.Success -> fresh
+                is Outcome.Failure -> if (fresh.error == DomainError.ServerIdentityMismatch) fresh else remembered.key.asSuccess()
+            }
         }
         return verifyServer(serverUrl, pin).flatMap { remember(it) }
     }
 
     /** Keeps the encryption key of a server that just proved its identity; none means a server before 0.5. */
     suspend fun remember(server: VerifiedServer): Outcome<EncryptionKey> {
+        learnAddresses(server)
         val key = server.encryptionKey ?: return DomainError.EncryptionUnavailable.asFailure()
-        trackerState.setEncryptionKey(TrustedEncryptionKey(key, server.publicKey))
+        trackerState.setEncryptionKey(TrustedEncryptionKey(key, server.publicKey, clock.now()))
         return key.asSuccess()
+    }
+
+    /**
+     * The server's own list replaces the known addresses, the one in use kept too: an address the
+     * server no longer gives (an old LAN address) goes, and one it gained (a relay) comes. Only for
+     * the server this tracker still trusts: the settings may have moved on meanwhile.
+     */
+    private suspend fun learnAddresses(server: VerifiedServer) {
+        val config = trackerConfig ?: return
+        if (server.addresses.isEmpty()) return
+        config.update { current ->
+            if (current.serverPin?.matches(server.publicKey) != true) return@update current
+            val advertised = server.addresses.distinct().take(MAX_ADVERTISED_ADDRESSES)
+            // The one in use stays, even when the server lists as many as a tracker keeps.
+            val learned = when {
+                current.serverUrl.isBlank() || current.serverUrl in advertised -> advertised
+                else -> advertised.take(MAX_ADVERTISED_ADDRESSES - 1) + current.serverUrl
+            }
+            if (learned == current.serverAddresses) current else current.copy(serverAddresses = learned)
+        }
+    }
+
+    companion object {
+        val RECHECK_AFTER: Duration = Duration.ofDays(1)
     }
 
     /** After the server said it no longer has the key: the next request asks for the current one. */

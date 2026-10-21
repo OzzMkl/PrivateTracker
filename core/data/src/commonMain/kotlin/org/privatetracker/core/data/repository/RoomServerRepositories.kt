@@ -3,14 +3,16 @@ package org.privatetracker.core.data.repository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.privatetracker.core.data.mapper.millis
-import org.privatetracker.core.data.mapper.toInstant
 import org.privatetracker.core.data.mapper.toDomain
 import org.privatetracker.core.data.mapper.toEntity
+import org.privatetracker.core.data.mapper.toInstant
 import org.privatetracker.core.database.ServerDatabase
 import org.privatetracker.core.database.server.DeviceDao
 import org.privatetracker.core.database.server.DeviceSessionEntity
 import org.privatetracker.core.database.server.LocationDao
+import org.privatetracker.core.database.server.RemovedDeviceEntity
 import org.privatetracker.core.database.server.SessionDao
+import org.privatetracker.core.database.server.SyncDao
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.DeviceSession
@@ -31,7 +33,13 @@ class RoomTransactionRunner(private val database: ServerDatabase) : TransactionR
     override suspend fun <T> run(block: suspend () -> T): T = database.inTransaction(block)
 }
 
-class RoomDeviceRepository(private val dao: DeviceDao) : DeviceRepository {
+/**
+ * Every write to a device takes the next number of `device_changes` (1.0), so paired servers can ask
+ * for the changes after the last one they got; a removal leaves a row of its own for the same reason.
+ */
+class RoomDeviceRepository(private val database: ServerDatabase) : DeviceRepository {
+    private val dao: DeviceDao = database.devices()
+
     override suspend fun get(id: DeviceId): Device? = dao.get(id.value)?.toDomain()
 
     override suspend fun getWithLastLocation(id: DeviceId): DeviceWithLastLocation? =
@@ -44,20 +52,11 @@ class RoomDeviceRepository(private val dao: DeviceDao) : DeviceRepository {
         dao.observeAllWithLastLocation().map { rows -> rows.map { it.toDomain() } }
 
     override suspend fun insert(device: Device) {
-        dao.insert(device.toEntity())
+        database.inTransaction { dao.insert(device.toEntity(database.sync().nextDeviceChange())) }
     }
 
     override suspend fun update(device: Device) {
-        val updated = dao.updateDetails(
-            uid = device.id.value,
-            name = device.name,
-            platform = device.platform.name,
-            appVersion = device.appVersion,
-            protocolVersion = device.protocolVersion,
-            publicKey = device.publicKey,
-            lastSeenAt = device.lastSeenAt?.millis(),
-            approval = device.approval.name,
-        )
+        val updated = database.inTransaction { dao.updateDetails(device, database.sync().nextDeviceChange()) }
         check(updated == 1) { "Device ${device.id} does not exist" }
     }
 
@@ -65,8 +64,49 @@ class RoomDeviceRepository(private val dao: DeviceDao) : DeviceRepository {
         dao.setLastLocation(id.value, locationId.value)
     }
 
-    override suspend fun delete(id: DeviceId): Boolean = dao.delete(id.value) > 0
+    override suspend fun delete(id: DeviceId, at: Instant): Boolean = database.inTransaction {
+        val deleted = dao.delete(id.value) > 0
+        if (deleted) {
+            val sync = database.sync()
+            sync.putRemoval(RemovedDeviceEntity(id.value, at.millis(), sync.nextDeviceChange()))
+        }
+        deleted
+    }
 }
+
+internal suspend fun DeviceDao.updateDetails(device: Device, changeSeq: Long): Int = updateDetails(
+    uid = device.id.value,
+    name = device.name,
+    platform = device.platform.name,
+    appVersion = device.appVersion,
+    protocolVersion = device.protocolVersion,
+    publicKey = device.publicKey,
+    createdAt = device.createdAt.millis(),
+    lastSeenAt = device.lastSeenAt?.millis(),
+    approval = device.approval.name,
+    updatedAt = device.updatedAt?.millis(),
+    approvalChangedAt = device.approvalChangedAt?.millis(),
+    changeSeq = changeSeq,
+)
+
+/** The next number of a change to devices; call it inside the transaction that makes the change. */
+internal suspend fun SyncDao.nextDeviceChange(): Long {
+    startNumbering()
+    incrementCounter(DEVICE_CHANGES)
+    return checkNotNull(counter(DEVICE_CHANGES))
+}
+
+/**
+ * Once, the first time after 1.0's migration: devices from before it take their row id as number and
+ * the counter goes on from there. Call it inside the transaction that reads or makes a change.
+ */
+internal suspend fun SyncDao.startNumbering() {
+    if (counter(DEVICE_CHANGES) != null) return
+    numberDevicesById()
+    startCounterAfterDevices(DEVICE_CHANGES)
+}
+
+internal const val DEVICE_CHANGES = "device_changes"
 
 class RoomLocationRepository(
     private val locations: LocationDao,

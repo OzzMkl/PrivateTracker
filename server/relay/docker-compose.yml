@@ -1,0 +1,30 @@
+# docker compose up -d   (after: ./gradlew :server:relay:installDist)
+services:
+  relay:
+    image: privatetracker-relay
+    build: .
+    container_name: privatetracker-relay
+    restart: unless-stopped
+    ports:
+      # Trackers and servers both arrive on 443; the relay sorts them by the name they ask for.
+      - "443:8443"
+    environment:
+      # This name and every name under it (*.relay.example.org) must point to this host in DNS.
+      PRIVATETRACKER_RELAY_DOMAIN: "relay.example.org"
+      # The fingerprints of the servers this relay carries (privatetracker-server fingerprint, or the
+      # Servidor screen of the phone), separated by commas.
+      PRIVATETRACKER_RELAY_ALLOW: "9E9D-7678-D67D-F283"
+    volumes:
+      - privatetracker-relay-data:/data
+    # Nothing but /data and /tmp is written.
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
+
+volumes:
+  privatetracker-relay-data:

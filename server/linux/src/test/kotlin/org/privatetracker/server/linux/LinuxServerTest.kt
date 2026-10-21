@@ -15,10 +15,11 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Parameters
-import io.ktor.utils.io.readUTF8Line
+import io.ktor.utils.io.readLine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import okhttp3.Dns
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -31,12 +32,17 @@ import org.privatetracker.core.domain.model.GeoPoint
 import org.privatetracker.core.domain.model.GeofenceShape
 import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.Platform
+import org.privatetracker.core.domain.model.RelayAddress
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.ServerPin
+import org.privatetracker.core.domain.model.TimeRange
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.UploadResult
+import org.privatetracker.core.domain.model.keyFingerprint
+import org.privatetracker.core.domain.model.relayLabel
 import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.DEVICE_B
+import org.privatetracker.core.domain.testing.FakeServerDiscovery
 import org.privatetracker.core.domain.testing.FixedBattery
 import org.privatetracker.core.domain.testing.InMemoryIdentityRepository
 import org.privatetracker.core.domain.testing.InMemoryOutboxRepository
@@ -48,6 +54,7 @@ import org.privatetracker.core.domain.testing.failureError
 import org.privatetracker.core.domain.testing.successValue
 import org.privatetracker.core.domain.usecase.common.GetOrCreateDeviceIdentity
 import org.privatetracker.core.domain.usecase.server.GeofenceDraft
+import org.privatetracker.core.domain.usecase.tracker.FailOverServerAddress
 import org.privatetracker.core.domain.usecase.tracker.GetServerEncryptionKey
 import org.privatetracker.core.domain.usecase.tracker.PairWithServer
 import org.privatetracker.core.domain.usecase.tracker.RecordLocation
@@ -61,15 +68,25 @@ import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.crypto.InMemoryDeviceKeys
 import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.protocol.v1.PairingUri
+import org.privatetracker.server.hostkeys.IdentityKeyFile
+import org.privatetracker.server.hostkeys.SelfSignedCertificate
 import org.privatetracker.server.linux.admin.AdminClient
 import org.privatetracker.server.linux.admin.AdminReply
 import org.privatetracker.server.linux.admin.AdminRequest
 import org.privatetracker.server.linux.admin.AlreadyRunningException
+import org.privatetracker.server.linux.keys.FileServerKeys
 import org.privatetracker.server.linux.keys.PemFiles
-import org.privatetracker.server.linux.keys.SelfSignedCertificate
+import org.privatetracker.server.relay.Relay
+import org.privatetracker.server.relay.RelaySettings
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
+import java.net.UnknownHostException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -94,18 +111,43 @@ class LinuxServerTest {
 
     private val port = ServerSocket(0).use { it.localPort }
     private val url = "https://127.0.0.1:$port"
-    private val clients = OkHttpPinnedClients("PrivateTracker-Test")
+    /** False once a tracker "leaves home": the LAN name home.lan.test stops resolving. */
+    @Volatile private var atHome = true
+
+    // Names under relay.test resolve to this machine, as a relay's wildcard DNS would to its host; so
+    // does home.lan.test, the server's LAN name, while the tracker is at home.
+    private val dns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> = when {
+            hostname.endsWith(".relay.test") -> listOf(InetAddress.getLoopbackAddress())
+            hostname == "home.lan.test" -> if (atHome) listOf(InetAddress.getLoopbackAddress()) else throw UnknownHostException(hostname)
+            else -> Dns.SYSTEM.lookup(hostname)
+        }
+    }
+    private val clients = OkHttpPinnedClients("PrivateTracker-Test", dns = dns)
     private val running = mutableListOf<LinuxServer>()
 
     private val webPort = ServerSocket(0).use { it.localPort }
     private val webUrl = "https://127.0.0.1:$webPort"
 
-    private fun startServer(acceptNewDevices: Boolean = true, web: WebSettings? = null): ServerGraph {
-        val config = ServerConfig(serverName = "Casa", port = port, bindAddress = "127.0.0.1", acceptNewDevices = acceptNewDevices)
-        val settings = ServeSettings(config, publicUrls = listOf(url), web = web)
-        val data = DataDirectory(dir).also { it.prepare() }
-        val graph = ServerGraph(settings, data)
-        LinuxServer(graph, "test").also { it.start() }.let(running::add)
+    private fun startServer(
+        acceptNewDevices: Boolean = true,
+        web: WebSettings? = null,
+        relay: Pair<String, String>? = null,
+        publicUrls: List<String>? = null,
+        name: String = "Casa",
+        dataDir: Path = dir,
+        serverPort: Int = port,
+    ): ServerGraph {
+        val config = ServerConfig(
+            serverName = name, port = serverPort, bindAddress = "127.0.0.1", acceptNewDevices = acceptNewDevices,
+            relayAddress = relay?.first.orEmpty(), relayFingerprint = relay?.second.orEmpty(),
+        )
+        val settings = ServeSettings(config, publicUrls = publicUrls ?: listOf("https://127.0.0.1:$serverPort"), web = web)
+        val data = DataDirectory(dataDir).also { it.prepare() }
+        val graph = ServerGraph(settings, data, peerClients = OkHttpPinnedClients("PrivateTracker-Test", dns = dns))
+        // The relay's name resolves nowhere: the tunnel dials this machine.
+        val dial = { address: RelayAddress -> Socket().apply { connect(InetSocketAddress("127.0.0.1", address.port), 5_000) } }
+        LinuxServer(graph, "test", relayDial = dial).also { it.start() }.let(running::add)
         return graph
     }
 
@@ -131,7 +173,7 @@ class LinuxServerTest {
         private val identity = GetOrCreateDeviceIdentity(InMemoryIdentityRepository(id), ids)
         private val record = RecordLocation(outbox, state, this.config, identity, FixedBattery(), LocationValidator(clock), ids)
         private val verifyServer = VerifyServerIdentity(gateway, EcdsaP256)
-        private val encryption = GetServerEncryptionKey(state, verifyServer, clock)
+        private val encryption = GetServerEncryptionKey(state, verifyServer, clock, this.config)
         private val register = RegisterDevice(gateway, this.config, state, identity, keys, verifyServer, encryption, AppInfo(Platform.ANDROID, "test"), clock)
         private val uploadPending = UploadPendingLocations(outbox, gateway, this.config, state, register, encryption, identity, clock)
         private val pairWith = PairWithServer(verifyServer, this.config, register, clock)
@@ -145,6 +187,11 @@ class LinuxServerTest {
         }
 
         fun upload(): UploadResult = runBlocking { uploadPending() }
+
+        private val failOverServerAddress = FailOverServerAddress(this.config, verifyServer, FakeServerDiscovery(), clock)
+
+        /** What the app does when its server stops answering: another known address where it proves its key. */
+        fun failOver(): Boolean = runBlocking { failOverServerAddress() }
 
         /** Fixes at these latitudes, a minute apart and ending now, then one upload. */
         fun walk(vararg latitudes: Double): UploadResult = runBlocking {
@@ -172,10 +219,10 @@ class LinuxServerTest {
         header(HttpHeaders.Cookie, "__Host-pt-session=$session")
     }
 
-    /** Runs `pair` as the command line does, on its own thread; its replies arrive in order. */
-    private fun startPairing(): Pair<AdminReply.Invite, LinkedBlockingQueue<AdminReply>> {
+    /** Runs `pair` (or `peers invite`) as the command line does, on its own thread; its replies arrive in order. */
+    private fun startPairing(request: AdminRequest = AdminRequest.Pair): Pair<AdminReply.Invite, LinkedBlockingQueue<AdminReply>> {
         val replies = LinkedBlockingQueue<AdminReply>()
-        thread(isDaemon = true) { admin.exchange(AdminRequest.Pair) { replies.put(it) } }
+        thread(isDaemon = true) { admin.exchange(request) { replies.put(it) } }
         val invite = assertIs<AdminReply.Invite>(replies.poll(10, TimeUnit.SECONDS))
         return invite to replies
     }
@@ -371,7 +418,7 @@ class LinuxServerTest {
                 suspend fun next(): Pair<String, String> {
                     var event = ""
                     while (true) {
-                        val line = withTimeout(20_000) { channel.readUTF8Line() } ?: error("The stream ended")
+                        val line = withTimeout(20_000) { channel.readLine() } ?: error("The stream ended")
                         if (line.startsWith("event: ")) event = line.removePrefix("event: ")
                         if (line.startsWith("data: ")) return event to line.removePrefix("data: ")
                     }
@@ -475,6 +522,76 @@ class LinuxServerTest {
 
             assertTrue(assertIs<AdminReply.Users>(admin.single(AdminRequest.RemoveUser("ana"))).users.isEmpty())
             assertTrue("No hay ninguna cuenta" in assertIs<AdminReply.Error>(admin.single(AdminRequest.RemoveUser("ana"))).message)
+        }
+    }
+
+    @Test
+    fun `away from home a tracker reaches its server through the relay, whose address it learned at home`() {
+        // The server's key exists before the relay's list can name it.
+        val serverFingerprint = assertNotNull(keyFingerprint(runBlocking { FileServerKeys(DataDirectory(dir).also { it.prepare() }.identity, Clock.System).publicKey() }))
+        val relayKeys = IdentityKeyFile(dir.resolve("relay.p12"), "relay", "PrivateTracker Relay", Instant::now)
+        val relay = Relay(RelaySettings("relay.test", 0, "127.0.0.1", setOf(serverFingerprint)), relayKeys.keyManager())
+        relay.start()
+        try {
+            val home = "https://home.lan.test:$port"
+            startServer(relay = "relay.test:${relay.port}" to assertNotNull(keyFingerprint(relayKeys.publicKey())), publicUrls = listOf(home))
+            val relayUrl = "https://${relayLabel(serverFingerprint)}.relay.test:${relay.port}"
+            waitUntil { assertIs<AdminReply.Status>(admin.single(AdminRequest.Status)).relayUrl == relayUrl }
+
+            // Set up by hand at home, with the LAN address and the fingerprint: it knows of no relay yet.
+            val tracker = Tracker(TrackerConfig(serverUrl = home, deviceName = "Moto de Luis", serverFingerprint = serverFingerprint))
+            tracker.recordAndUpload(1)
+            assertIs<AdminReply.Done>(admin.single(AdminRequest.Approve(DEVICE_A.value)))
+            assertEquals(UploadResult.Completed(sent = 1, rejected = 0, hasMore = false), tracker.upload())
+            // The server's signed answer taught it every address, the relay's last.
+            assertEquals(listOf(home, relayUrl), runBlocking { tracker.config.get() }.serverAddresses)
+
+            // Away from home the LAN name no longer resolves, and the connections of the home network are gone;
+            // the app fails over to the next known address.
+            atHome = false
+            clients.close()
+            assertTrue(tracker.recordAndUpload(2) !is UploadResult.Completed)
+            assertTrue(tracker.failOver())
+
+            assertEquals(relayUrl, runBlocking { tracker.config.get() }.serverUrl)
+            assertEquals(UploadResult.Completed(sent = 2, rejected = 0, hasMore = false), tracker.upload())
+        } finally {
+            relay.stop()
+        }
+    }
+
+    @Test
+    fun `two servers pair through the command line and the new one gets the other one's trackers at once`(@TempDir officeDir: Path) {
+        startServer()
+        val officePort = ServerSocket(0).use { it.localPort }
+        val officeGraph = startServer(name = "Oficina", dataDir = officeDir, serverPort = officePort)
+        val office = AdminClient(DataDirectory(officeDir).adminSocket)
+        val (invite, replies) = startPairing(AdminRequest.PeerInvite)
+        val tracker = Tracker()
+        val (trackerInvite, _) = startPairing()
+        tracker.pair(assertNotNull(PairingUri.parse(trackerInvite.uri))).successValue()
+        assertEquals(UploadResult.Completed(sent = 3, rejected = 0, hasMore = false), tracker.recordAndUpload(3))
+
+        // The office joins with the link the home server printed.
+        val joined = assertIs<AdminReply.PeerJoined>(office.single(AdminRequest.PeerJoin(invite.uri)))
+        assertEquals("Casa" to invite.fingerprint, joined.peer.name to joined.peer.fingerprint)
+        assertEquals("Oficina", assertIs<AdminReply.PeerJoined>(replies.poll(10, TimeUnit.SECONDS)).peer.name)
+
+        // The first exchange follows the join at once: the office has the tracker and its positions.
+        waitUntil { assertIs<AdminReply.Devices>(office.single(AdminRequest.Devices)).devices.singleOrNull()?.approval == "APPROVED" }
+        waitUntil { assertIs<AdminReply.Peers>(office.single(AdminRequest.Peers)).peers.single().lastExchangeAtMillis != null }
+        val day = TimeRange(Instant.now().minus(Duration.ofDays(1)), Instant.now().plus(Duration.ofDays(1)))
+        assertEquals(3, runBlocking { officeGraph.getDeviceTrack(DEVICE_A, day) }.successValue().pointCount)
+        assertNull(assertIs<AdminReply.Peers>(office.single(AdminRequest.Peers)).peers.single().lastError)
+        assertEquals(1, assertIs<AdminReply.Status>(admin.single(AdminRequest.Status)).peers)
+        assertTrue(assertIs<AdminReply.Peers>(admin.single(AdminRequest.PeerRemove("Oficina"))).peers.isEmpty())
+    }
+
+    private fun waitUntil(condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 15_000
+        while (!condition()) {
+            assertTrue(System.currentTimeMillis() < deadline, "Timed out")
+            Thread.sleep(100)
         }
     }
 

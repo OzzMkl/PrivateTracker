@@ -26,15 +26,19 @@ import androidx.navigation3.ui.NavDisplay
 import org.privatetracker.R
 import org.privatetracker.core.domain.model.AppMode
 import org.privatetracker.core.domain.model.DeviceId
+import org.privatetracker.core.protocol.v1.PairingUri
 import org.privatetracker.feature.devices.detail.DeviceDetailRoute
 import org.privatetracker.feature.devices.history.DeviceHistoryRoute
-import org.privatetracker.feature.geofences.editor.GeofenceEditorRoute
-import org.privatetracker.feature.geofences.list.GeofencesRoute
 import org.privatetracker.feature.devices.list.DeviceListRoute
 import org.privatetracker.feature.devices.map.DevicesMapRoute
+import org.privatetracker.feature.geofences.editor.GeofenceEditorRoute
+import org.privatetracker.feature.geofences.list.GeofencesRoute
 import org.privatetracker.feature.onboarding.PermissionsRoute
 import org.privatetracker.feature.server.ui.PairingRoute
 import org.privatetracker.feature.server.ui.ServerRoute
+import org.privatetracker.feature.server.ui.peers.PeerInviteRoute
+import org.privatetracker.feature.server.ui.peers.PeerJoinRoute
+import org.privatetracker.feature.server.ui.peers.PeersRoute
 import org.privatetracker.feature.settings.SettingsRoute
 import org.privatetracker.feature.tracker.pairing.TrackerPairingRoute
 import org.privatetracker.feature.tracker.ui.TrackerRoute
@@ -61,14 +65,17 @@ fun MainScaffold(mode: AppMode, pairingLink: String?, onPairingLinkHandled: () -
     val openDevice: (DeviceId) -> Unit = { backStack.add(DeviceDetailKey(it.value)) }
     val openTrackerPairing: () -> Unit = { backStack.add(TrackerPairingKey()) }
 
-    // A pairing link opened from a camera app. Only a phone that tracks can pair with a server.
+    // A pairing link opened from a camera app. Only a phone that tracks can pair with a server, and
+    // only one that serves can pair with another server (1.0).
     val context = LocalContext.current
     LaunchedEffect(pairingLink) {
         if (pairingLink != null) {
-            if (mode.tracks) {
-                backStack.add(TrackerPairingKey(pairingLink))
-            } else {
-                Toast.makeText(context, R.string.pairing_link_needs_tracker, Toast.LENGTH_LONG).show()
+            val forServer = pairingLink.startsWith("${PairingUri.SCHEME}://${PairingUri.PEER_HOST}")
+            when {
+                forServer && mode.serves -> backStack.add(PeerJoinKey(pairingLink))
+                forServer -> Toast.makeText(context, R.string.pairing_link_needs_server, Toast.LENGTH_LONG).show()
+                mode.tracks -> backStack.add(TrackerPairingKey(pairingLink))
+                else -> Toast.makeText(context, R.string.pairing_link_needs_tracker, Toast.LENGTH_LONG).show()
             }
             onPairingLinkHandled()
         }
@@ -108,6 +115,7 @@ fun MainScaffold(mode: AppMode, pairingLink: String?, onPairingLinkHandled: () -
                         onOpenPermissions = openPermissions,
                         onOpenDevices = { backStack.reset(DevicesKey) },
                         onOpenPairing = { backStack.add(ServerPairingKey) },
+                        onOpenPeers = { backStack.add(PeersKey) },
                     )
                 }
                 entry<TrackerKey> {
@@ -119,6 +127,11 @@ fun MainScaffold(mode: AppMode, pairingLink: String?, onPairingLinkHandled: () -
                 }
                 entry<SettingsKey> { SettingsRoute(onOpenPermissions = openPermissions, onOpenPairing = openTrackerPairing) }
                 entry<ServerPairingKey> { PairingRoute(onBack = pop) }
+                entry<PeersKey> {
+                    PeersRoute(onInvite = { backStack.add(PeerInviteKey) }, onJoin = { backStack.add(PeerJoinKey()) }, onBack = pop)
+                }
+                entry<PeerInviteKey> { PeerInviteRoute(onBack = pop) }
+                entry<PeerJoinKey> { key -> PeerJoinRoute(link = key.link, onDone = pop, onBack = pop) }
                 entry<TrackerPairingKey> { key ->
                     TrackerPairingRoute(
                         link = key.link,

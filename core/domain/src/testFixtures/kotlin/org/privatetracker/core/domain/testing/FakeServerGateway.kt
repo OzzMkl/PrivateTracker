@@ -16,6 +16,7 @@ import org.privatetracker.core.domain.model.ServerInfo
 import org.privatetracker.core.domain.model.ServerPin
 import org.privatetracker.core.domain.model.SignedEncryptionKey
 import org.privatetracker.core.domain.model.encryptionKeyInput
+import org.privatetracker.core.domain.model.serverAddressesInput
 import org.privatetracker.core.domain.model.serverIdentityInput
 import org.privatetracker.core.domain.port.ServerGateway
 import java.time.Duration
@@ -64,6 +65,12 @@ class FakeServerGateway(private val clock: Clock = FakeClock()) : ServerGateway 
     /** What an attacker on the way puts in health's answer instead of [encryptionKey], the challenge's signature untouched. */
     var swappedEncryptionKey: EncryptionKey? = null
 
+    /** Where health says the server can be reached, signed over the challenge; empty for a server before 1.0. */
+    var advertisedAddresses: List<String> = emptyList()
+
+    /** Who signs [advertisedAddresses]: the server itself unless a test says otherwise. */
+    var addressesSigner: String? = null
+
     /** Ids of the keys the server can still open. */
     val keptEncryptionKeys = mutableSetOf(anEncryptionKey(1).id)
 
@@ -85,7 +92,10 @@ class FakeServerGateway(private val clock: Clock = FakeClock()) : ServerGateway 
         val now = clock.now()
         val identity = challenge?.let {
             val key = keyAt(serverUrl)
-            ServerIdentity(key, Base64.getEncoder().encodeToString(fakeSignature(key, serverIdentityInput(it, now, encryptionKey?.id))))
+            val signature = Base64.getEncoder().encodeToString(fakeSignature(key, serverIdentityInput(it, now, encryptionKey?.id)))
+            val addressesSignature = advertisedAddresses.takeIf { list -> list.isNotEmpty() }
+                ?.let { list -> Base64.getEncoder().encodeToString(fakeSignature(addressesSigner ?: key, serverAddressesInput(it, list))) }
+            ServerIdentity(key, signature, advertisedAddresses, addressesSignature)
         }
         val encryption = (swappedEncryptionKey ?: encryptionKey)?.let {
             SignedEncryptionKey(it, Base64.getEncoder().encodeToString(fakeSignature(encryptionKeySigner ?: keyAt(serverUrl), encryptionKeyInput(it))))

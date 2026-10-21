@@ -43,10 +43,14 @@ sealed interface ServerRunState {
     data class Failed(val error: DomainError) : ServerRunState
 }
 
-/** What the server service reports. [requestsServed] counts since the server last started. */
+/**
+ * What the server service reports. [requestsServed] counts since the server last started; [relay] is
+ * how its tunnel to a relay is doing, from 1.0.
+ */
 data class ServerActivity(
     val state: ServerRunState = ServerRunState.Stopped,
     val requestsServed: Long = 0,
+    val relay: RelayState = RelayState.Off,
 )
 
 /** An IP address of this phone, as the platform lists it. */

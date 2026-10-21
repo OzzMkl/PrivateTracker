@@ -10,7 +10,7 @@ import org.privatetracker.core.domain.model.WebAccount
 import org.privatetracker.core.domain.model.WebSession
 import org.privatetracker.core.domain.repository.WebAccountRepository
 import org.privatetracker.core.domain.repository.WebSessionRepository
-import org.privatetracker.server.linux.writeAtomically
+import org.privatetracker.server.hostkeys.writeAtomically
 import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.nio.file.Files

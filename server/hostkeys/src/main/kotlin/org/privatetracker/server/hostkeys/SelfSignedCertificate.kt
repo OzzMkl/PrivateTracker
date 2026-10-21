@@ -1,4 +1,4 @@
-package org.privatetracker.server.linux.keys
+package org.privatetracker.server.hostkeys
 
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import java.io.ByteArrayOutputStream
@@ -17,13 +17,13 @@ import java.time.format.DateTimeFormatter
  * and a few lines of DER spare the server BouncyCastle.
  */
 object SelfSignedCertificate {
-    private const val COMMON_NAME = "PrivateTracker Server"
+    const val SERVER_NAME = "PrivateTracker Server"
 
     // RFC 5280: notAfter 9999-12-31T23:59:59Z means the certificate has no expiry date.
     private val NO_EXPIRY: Instant = Instant.parse("9999-12-31T23:59:59Z")
 
-    fun create(keys: KeyPair, now: Instant, random: SecureRandom = SecureRandom()): X509Certificate {
-        val name = sequence(set(sequence(oid(OID_COMMON_NAME), utf8String(COMMON_NAME))))
+    fun create(keys: KeyPair, now: Instant, random: SecureRandom = SecureRandom(), commonName: String = SERVER_NAME): X509Certificate {
+        val name = sequence(set(sequence(oid(OID_COMMON_NAME), utf8String(commonName))))
         val algorithm = sequence(oid(OID_ECDSA_WITH_SHA256))
         val tbs = sequence(
             explicit(0, integer(byteArrayOf(2))),

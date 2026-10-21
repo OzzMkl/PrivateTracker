@@ -61,7 +61,7 @@ class RoomGeofenceRepositoryTest {
     @BeforeEach
     fun setUp() = runTest {
         database = ServerDatabase.inMemory()
-        devices = RoomDeviceRepository(database.devices())
+        devices = RoomDeviceRepository(database)
         geofences = RoomGeofenceRepository(database, database.geofences(), database.devices())
         devices.insert(aDevice(DEVICE_A).copy(approval = DeviceApproval.APPROVED))
         devices.insert(aDevice(DEVICE_B, name = "Moto de Luis"))
@@ -123,7 +123,7 @@ class RoomGeofenceRepositoryTest {
         geofences.saveState(GeofenceState(polygon.id, DEVICE_B, false, true, 1, T0, T0))
         geofences.addEvent(GeofenceEvent(polygon.id, DEVICE_B, GeofenceTransition.EXIT, T0, T0, alerted = false))
 
-        devices.delete(DEVICE_B)
+        devices.delete(DEVICE_B, T0)
 
         assertNull(geofences.state(polygon.id, DEVICE_B))
         assertTrue(geofences.observeEvents(10).first().isEmpty())

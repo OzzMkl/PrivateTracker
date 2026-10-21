@@ -26,11 +26,12 @@ import kotlinx.html.strong
 import kotlinx.html.unsafe
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.PairingInvite
 import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.protocol.v1.PairingUri
 import org.privatetracker.server.web.WebDependencies
-import org.privatetracker.server.web.WebPairing
+import org.privatetracker.server.web.WebInvites
 import org.privatetracker.server.web.page.Assets
 import org.privatetracker.server.web.page.PageContext
 import org.privatetracker.server.web.page.Section
@@ -46,7 +47,8 @@ internal fun Route.pairingRoutes(deps: WebDependencies, assets: Assets) {
         val session = call.requireSession(deps)
         call.noStore()
         val ctx = call.pageContext(deps, assets, session)
-        call.respondHtml { page(ctx, "Emparejar", Section.DEVICES) { pairingStart(deps.pairing.urls(), error = null) } }
+        val urls = deps.pairing.urls()
+        call.respondHtml { page(ctx, "Emparejar", Section.DEVICES) { pairingStart(urls, error = null) } }
     }
 
     post("/pair") {
@@ -61,7 +63,8 @@ internal fun Route.pairingRoutes(deps: WebDependencies, assets: Assets) {
                 }
                 call.noStore()
                 val ctx = call.pageContext(deps, assets, session)
-                call.respondHtml(HttpStatusCode.ServiceUnavailable) { page(ctx, "Emparejar", Section.DEVICES) { pairingStart(deps.pairing.urls(), error) } }
+                val urls = deps.pairing.urls()
+                call.respondHtml(HttpStatusCode.ServiceUnavailable) { page(ctx, "Emparejar", Section.DEVICES) { pairingStart(urls, error) } }
             }
         }
     }
@@ -71,12 +74,12 @@ internal fun Route.pairingRoutes(deps: WebDependencies, assets: Assets) {
         val ticket = call.parameters["ticket"].orEmpty()
         call.noStore()
         val ctx = call.pageContext(deps, assets, session)
-        val state = deps.pairing.state(ticket) ?: WebPairing.State.Ended
+        val state = deps.pairing.state(ticket) ?: WebInvites.State.Ended
         call.respondHtml {
             page(ctx, "Emparejar", Section.DEVICES) {
                 section("card pairing") {
                     h1 { +"Emparejar un teléfono" }
-                    if (state is WebPairing.State.Waiting) {
+                    if (state is WebInvites.State.Waiting) {
                         pairingCode(ctx, state.invite)
                     }
                     pairingStatus(ticket, state)
@@ -91,11 +94,11 @@ internal fun Route.pairingRoutes(deps: WebDependencies, assets: Assets) {
         val ticket = call.parameters["ticket"].orEmpty()
         call.noStore()
         val ctx = call.pageContext(deps, assets, session)
-        val state = deps.pairing.state(ticket) ?: WebPairing.State.Ended
+        val state = deps.pairing.state(ticket) ?: WebInvites.State.Ended
         call.respondFragment {
             pairingStatus(ticket, state)
             // Once over, the QR goes too: nobody should scan a code that no longer works.
-            if (state !is WebPairing.State.Waiting) {
+            if (state !is WebInvites.State.Waiting) {
                 div {
                     id = "pair-code"
                     hx("swap-oob", "true")
@@ -167,11 +170,11 @@ private fun FlowContent.pairingCode(ctx: PageContext, invite: PairingInvite) {
     }
 }
 
-private fun FlowContent.pairingStatus(ticket: String, state: WebPairing.State) {
+private fun FlowContent.pairingStatus(ticket: String, state: WebInvites.State<Device>) {
     div("pair-status") {
         id = "pair-status"
         when (state) {
-            is WebPairing.State.Waiting -> {
+            is WebInvites.State.Waiting -> {
                 hx("get", "/pair/$ticket/status")
                 hx("trigger", "every 2s")
                 hx("swap", "outerHTML")
@@ -180,17 +183,17 @@ private fun FlowContent.pairingStatus(ticket: String, state: WebPairing.State) {
                     button(type = ButtonType.submit, classes = "secondary") { +"Cancelar" }
                 }
             }
-            is WebPairing.State.Paired -> {
+            is WebInvites.State.Used -> {
                 div("success") {
                     attributes["role"] = "status"
-                    +"Emparejado: ${state.device.name}. Ya está aprobado y puede enviar su posición."
+                    +"Emparejado: ${state.by.name}. Ya está aprobado y puede enviar su posición."
                 }
                 p { a(href = "/devices", classes = "button primary") { +"Ver dispositivos" } }
             }
-            WebPairing.State.Expired, WebPairing.State.Ended -> {
+            WebInvites.State.Expired, WebInvites.State.Ended -> {
                 div("notice") {
                     attributes["role"] = "status"
-                    +if (state == WebPairing.State.Expired) "El código venció sin que ningún teléfono lo usara." else "Este código ya no vale: se generó otro o se dejó de mostrar."
+                    +if (state == WebInvites.State.Expired) "El código venció sin que ningún teléfono lo usara." else "Este código ya no vale: se generó otro o se dejó de mostrar."
                 }
                 form(action = "/pair", method = FormMethod.post) {
                     button(type = ButtonType.submit, classes = "primary") { +"Generar otro código" }

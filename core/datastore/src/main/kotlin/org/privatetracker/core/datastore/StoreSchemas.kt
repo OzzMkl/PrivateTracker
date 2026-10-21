@@ -36,6 +36,9 @@ data class ServerConfigData(
     val maxBatchSize: Int = 100,
     val exposeReadApi: Boolean = false,
     val advertiseOnLan: Boolean = true,
+    val relayAddress: String = "",
+    val relayFingerprint: String = "",
+    val relayWeb: Boolean = false,
 )
 
 @Serializable
@@ -59,6 +62,8 @@ data class TrustedEncryptionKeyData(
     val publicKey: String,
     val useUntilMillis: Long,
     val serverKey: String,
+    /** From 1.0: when the server last proved itself; absent in what 0.5 kept. */
+    val verifiedAtMillis: Long? = null,
 )
 
 /**

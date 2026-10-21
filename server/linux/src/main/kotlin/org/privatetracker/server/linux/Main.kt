@@ -6,6 +6,7 @@ import org.privatetracker.server.linux.admin.AdminReply
 import org.privatetracker.server.linux.admin.AdminRequest
 import org.privatetracker.server.linux.admin.AlreadyRunningException
 import org.privatetracker.server.linux.admin.DeviceRow
+import org.privatetracker.server.linux.admin.PeerRow
 import org.privatetracker.server.linux.admin.ServerNotAnsweringException
 import org.privatetracker.server.linux.admin.ServerNotRunningException
 import org.privatetracker.server.linux.keys.WebCertificateException
@@ -37,6 +38,14 @@ private const val USAGE = """Uso: privatetracker-server <orden> [opciones]
   users add <nombre>    Crea una cuenta de la app web; pide la contraseña (15 caracteres o más)
   users passwd <nombre> Cambia la contraseña de una cuenta y cierra todas sus sesiones
   users remove <nombre> Borra una cuenta y cierra todas sus sesiones
+  peers                 Lista los servidores emparejados con este
+  peers invite          Muestra una invitación (QR y enlace) para que otro servidor se empareje y espera
+  peers join            Se empareja con el servidor de una invitación (privatetracker://peer?...): pide el
+                        enlace, que así no queda en el historial ni a la vista de otros usuarios con ps
+  peers remove <servidor>  Deja de compartir con ese servidor (su nombre exacto o su huella)
+
+Dos servidores emparejados comparten en ambos sentidos sus dispositivos y posiciones, cada minuto.
+Geocercas, cuentas de la app web y claves siguen siendo de cada uno.
 
 <disp.> es el id de un dispositivo, sus primeros caracteres (4 o más) o su nombre exacto.
 
@@ -54,6 +63,11 @@ Opciones de serve (o su variable de entorno):
   --accept-new-devices <true|false>  Si un Tracker configurado a mano puede pedir entrar (PRIVATETRACKER_ACCEPT_NEW_DEVICES;
                         true). Con false solo entran los emparejados con pair.
 
+Relay, para llegar al servidor desde fuera sin abrir puertos (privatetracker-relay en un VPS):
+  --relay <nombre[:puerto]>  El relay, p. ej. relay.example.org (PRIVATETRACKER_RELAY)
+  --relay-fingerprint <huella>  La huella de la clave del relay (PRIVATETRACKER_RELAY_FINGERPRINT)
+  --relay-web <true|false>  También la app web por el relay (PRIVATETRACKER_RELAY_WEB; false)
+
 App web (en su propio puerto; los Trackers no lo usan):
   --web-port <n>        Puerto HTTPS de la app web (PRIVATETRACKER_WEB_PORT; 8788). 0 la apaga
   --web-bind <ip>       Dirección donde escucha (PRIVATETRACKER_WEB_BIND; la de --bind)
@@ -69,7 +83,7 @@ Avisos de geocercas con la app web cerrada:
   --alert-webhook-token <token>  Se envía como Authorization: Bearer (PRIVATETRACKER_ALERT_WEBHOOK_TOKEN; mejor
                         por variable que por opción, que otros usuarios ven con ps)
 
-Opciones de pair:
+Opciones de pair y de peers invite:
   --png <archivo>       Guarda además el código QR como imagen PNG
 """
 
@@ -112,6 +126,7 @@ fun main(args: Array<String>) {
             }
             "fingerprint" -> println(expect<AdminReply.Status>(data, AdminRequest.Status).fingerprint ?: fail("La clave del servidor no responde", EXIT_ERROR))
             "users" -> users(arguments, data)
+            "peers" -> peers(arguments, data)
             else -> fail("Orden desconocida «${arguments.command}». Mira: privatetracker-server --help", EXIT_USAGE)
         }
     } catch (e: UsageException) {
@@ -262,12 +277,98 @@ private fun printStatus(status: AdminReply.Status) {
     val key = status.encryptionKeyId?.let { id -> "$id, se usa hasta ${status.encryptionKeyUntilMillis?.let { dateTime(Instant.ofEpochMilli(it)) }}" }
     println("Clave de cifrado: ${key ?: "no disponible"}")
     println("Peticiones:       ${status.requests}")
+    if (status.peers > 0) println("Emparejado con:   ${if (status.peers == 1) "1 servidor" else "${status.peers} servidores"} (privatetracker-server peers)")
+    status.relay?.let { relay ->
+        println("Relay:            $relay, ${status.relayState}")
+        status.relayUrl?.let { println("Fuera de casa:    $it") }
+    }
     if (status.webPort == null) {
         println("App web:          apagada")
     } else {
         println("App web:          puerto ${status.webPort}, ${if (status.webAccounts == 1) "1 cuenta" else "${status.webAccounts} cuentas"}")
         status.webCertificateSha256?.let { println("Certificado web:  SHA-256 $it") }
     }
+}
+
+/** `peers`, `peers invite|join|remove`: paired servers, through the running server (1.0). */
+private fun peers(arguments: Arguments, data: DataDirectory) {
+    when (val action = arguments.positional.firstOrNull() ?: "list") {
+        "list" -> printPeers(expect<AdminReply.Peers>(data, AdminRequest.Peers).peers)
+        "invite" -> peerInvite(data, arguments.value("png")?.let(Path::of))
+        "join" -> {
+            // As an argument it works too, but then the secret shows in ps and stays in the history.
+            val link = arguments.positional.getOrNull(1)?.takeIf { it != "-" } ?: readInviteLink()
+            val peer = expect<AdminReply.PeerJoined>(data, AdminRequest.PeerJoin(link)).peer
+            println("Emparejado con ${printable(peer.name)} (huella ${peer.fingerprint}). Desde ahora comparten dispositivos y posiciones cada minuto.")
+        }
+        "remove" -> {
+            val peer = arguments.positional.getOrNull(1) ?: throw UsageException("Indica el servidor: su nombre exacto o su huella")
+            expect<AdminReply.Peers>(data, AdminRequest.PeerRemove(peer))
+            println("Ya no se comparte nada con «$peer». Lo que llegó de él se queda; quítalo también en el otro servidor.")
+        }
+        else -> throw UsageException("Orden desconocida «peers $action». Usa: peers, peers invite, peers join o peers remove")
+    }
+}
+
+private fun peerInvite(data: DataDirectory, png: Path?) {
+    var joined = false
+    AdminClient(data.adminSocket).exchange(AdminRequest.PeerInvite, timeout = Duration.ofMinutes(11)) { reply ->
+        when (reply) {
+            is AdminReply.Invite -> {
+                val matrix = qrMatrix(reply.uri)
+                println()
+                print(terminalQr(matrix))
+                println()
+                png?.let {
+                    writeQrPng(matrix, it)
+                    println("Código QR guardado en $it")
+                }
+                println("En el otro servidor: en un teléfono, Servidor > Servidores emparejados > Unirme, y escanea el código;")
+                println("en Linux, corre privatetracker-server peers join y pega este enlace cuando lo pida:")
+                println("  ${reply.uri}")
+                println()
+                println("Huella de este servidor: ${reply.fingerprint}")
+                println("Vale hasta las ${clock(Instant.ofEpochMilli(reply.expiresAtMillis))}. Esperando al otro servidor... (Ctrl+C cancela)")
+            }
+            is AdminReply.PeerJoined -> {
+                joined = true
+                println("Emparejado con ${printable(reply.peer.name)} (huella ${reply.peer.fingerprint}). Compara la huella en ese servidor.")
+            }
+            AdminReply.Expired -> println("La invitación venció sin que otro servidor la usara. Genera otra con: privatetracker-server peers invite")
+            is AdminReply.Error -> fail(reply.message, EXIT_ERROR)
+            else -> Unit
+        }
+    }
+    if (!joined) exitProcess(EXIT_ERROR)
+}
+
+private fun printPeers(peers: List<PeerRow>) {
+    if (peers.isEmpty()) {
+        println("No hay servidores emparejados. Invita a otro con: privatetracker-server peers invite")
+        return
+    }
+    val rows = peers.map {
+        val last = it.lastExchangeAtMillis?.let { ms -> dateTime(Instant.ofEpochMilli(ms)) } ?: "nunca"
+        listOf(printable(it.name), it.fingerprint, last, it.lastError?.let(::peerErrorLabel) ?: "bien", it.addresses.firstOrNull() ?: "-")
+    }
+    val header = listOf("SERVIDOR", "HUELLA", "ÚLTIMO INTERCAMBIO", "ESTADO", "DIRECCIÓN")
+    val widths = header.indices.map { column -> (rows.map { it[column] } + header[column]).maxOf { it.length } }
+    (listOf(header) + rows).forEach { row -> println(row.mapIndexed { i, cell -> cell.padEnd(widths[i]) }.joinToString("  ").trimEnd()) }
+}
+
+private fun peerErrorLabel(code: String) = when (code) {
+    "PEER_UNKNOWN" -> "ese servidor ya no está emparejado con este"
+    "SERVER_IDENTITY_MISMATCH" -> "en su dirección responde otro servidor"
+    "NETWORK_UNREACHABLE", "NETWORK_TIMEOUT" -> "no se le alcanza"
+    else -> "falló ($code)"
+}
+
+/** Asked on a terminal; without one, the first line of the standard input. */
+private fun readInviteLink(): String {
+    val console = System.console()
+    val line = if (console != null) console.readLine("Pega el enlace de la invitación (privatetracker://peer?...): ") else readlnOrNull()
+    return line?.trim()?.takeIf { it.isNotEmpty() }
+        ?: fail("Sin terminal, el enlace se lee de la entrada estándar: printf '%s\n' '<enlace>' | privatetracker-server peers join", EXIT_USAGE)
 }
 
 /** `users`, `users add|passwd|remove <nombre>`: the web app's accounts, through the running server. */

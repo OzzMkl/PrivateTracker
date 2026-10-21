@@ -18,21 +18,23 @@ import org.privatetracker.core.data.repository.RoomDeviceRepository
 import org.privatetracker.core.data.repository.RoomGeofenceRepository
 import org.privatetracker.core.data.repository.RoomLocationRepository
 import org.privatetracker.core.data.repository.RoomOutboxRepository
+import org.privatetracker.core.data.repository.RoomPeerRepository
 import org.privatetracker.core.data.repository.RoomSessionRepository
+import org.privatetracker.core.data.repository.RoomSyncRepository
 import org.privatetracker.core.data.repository.RoomTransactionRunner
 import org.privatetracker.core.database.ServerDatabase
-import org.privatetracker.core.database.build
 import org.privatetracker.core.database.TrackerDatabase
+import org.privatetracker.core.database.build
 import org.privatetracker.core.database.server.DeviceDao
 import org.privatetracker.core.database.server.GeofenceDao
 import org.privatetracker.core.database.server.LocationDao
 import org.privatetracker.core.database.server.SessionDao
 import org.privatetracker.core.database.tracker.OutboxDao
 import org.privatetracker.core.datastore.AppModeData
+import org.privatetracker.core.datastore.HttpsAddressesMigration
 import org.privatetracker.core.datastore.IdentityData
 import org.privatetracker.core.datastore.ServerConfigData
 import org.privatetracker.core.datastore.ServerEncryptionKeysData
-import org.privatetracker.core.datastore.HttpsAddressesMigration
 import org.privatetracker.core.datastore.TrackerConfigData
 import org.privatetracker.core.datastore.TrackerStateData
 import org.privatetracker.core.datastore.createJsonDataStore
@@ -44,8 +46,10 @@ import org.privatetracker.core.domain.repository.GeofenceRepository
 import org.privatetracker.core.domain.repository.IdentityRepository
 import org.privatetracker.core.domain.repository.LocationRepository
 import org.privatetracker.core.domain.repository.OutboxRepository
+import org.privatetracker.core.domain.repository.PeerRepository
 import org.privatetracker.core.domain.repository.ServerConfigRepository
 import org.privatetracker.core.domain.repository.SessionRepository
+import org.privatetracker.core.domain.repository.SyncRepository
 import org.privatetracker.core.domain.repository.TrackerConfigRepository
 import org.privatetracker.core.domain.repository.TrackerStateRepository
 import javax.inject.Singleton
@@ -106,7 +110,12 @@ object StorageModule {
 @InstallIn(SingletonComponent::class)
 object RepositoryModule {
     @Provides fun transactions(database: ServerDatabase): TransactionRunner = RoomTransactionRunner(database)
-    @Provides fun devices(dao: DeviceDao): DeviceRepository = RoomDeviceRepository(dao)
+    @Provides fun devices(database: ServerDatabase): DeviceRepository = RoomDeviceRepository(database)
+
+    /** Paired servers and what their exchanges read and write (1.0), in server.db. */
+    @Provides fun peers(database: ServerDatabase): PeerRepository = RoomPeerRepository(database)
+
+    @Provides fun sync(database: ServerDatabase): SyncRepository = RoomSyncRepository(database)
 
     @Provides
     fun locations(locations: LocationDao, devices: DeviceDao, sessions: SessionDao): LocationRepository =

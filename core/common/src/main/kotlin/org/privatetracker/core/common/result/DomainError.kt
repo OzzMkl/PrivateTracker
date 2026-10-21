@@ -144,6 +144,16 @@ sealed interface DomainError {
     data object WebAccountNotFound : DomainError {
         override val code: String = "WEB_ACCOUNT_NOT_FOUND"
     }
+
+    /** The other server does not know this one (1.0): it was never paired, or its owner removed the pairing. */
+    data object PeerUnknown : DomainError {
+        override val code: String = "PEER_UNKNOWN"
+    }
+
+    /** No paired server has that key or name (1.0). */
+    data object PeerNotFound : DomainError {
+        override val code: String = "PEER_NOT_FOUND"
+    }
 }
 
 /** One broken rule of one input field. [rule] is one of the constants below. */

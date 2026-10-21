@@ -7,6 +7,7 @@ import io.ktor.server.routing.post
 import kotlinx.html.ButtonType
 import kotlinx.html.FlowContent
 import kotlinx.html.FormMethod
+import kotlinx.html.a
 import kotlinx.html.button
 import kotlinx.html.code
 import kotlinx.html.dd
@@ -22,6 +23,7 @@ import kotlinx.html.section
 import kotlinx.html.span
 import kotlinx.html.ul
 import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.domain.model.RelayState
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.server.web.WebDependencies
 import org.privatetracker.server.web.page.Assets
@@ -29,7 +31,9 @@ import org.privatetracker.server.web.page.Section
 import org.privatetracker.server.web.page.date
 import org.privatetracker.server.web.page.dateTime
 import org.privatetracker.server.web.page.page
+import org.privatetracker.server.web.page.peerStateLabel
 import org.privatetracker.server.web.page.relativeTime
+import org.privatetracker.server.web.page.relayStateLabel
 import org.privatetracker.server.web.security.requireSession
 import java.time.Duration
 
@@ -48,6 +52,7 @@ internal fun Route.serverRoutes(deps: WebDependencies, assets: Assets) {
         }
         val overviews = deps.getDeviceOverviews()
         val accounts = deps.listAccounts()
+        val peers = deps.peers?.list()
         val message = when (call.parameters["done"]) {
             "rotated" -> "Clave de cifrado nueva. Las anteriores se borraron; los Trackers piden la nueva solos."
             "rotate-failed" -> "No se pudo rotar la clave: el archivo de claves no responde."
@@ -99,6 +104,24 @@ internal fun Route.serverRoutes(deps: WebDependencies, assets: Assets) {
                             p("muted small") { +"El navegador avisa porque nadie más firmó este certificado. Compara esta huella con la que muestra el navegador en los detalles del certificado." }
                         }
                     }
+                    host.relay?.let { relay ->
+                        card("Relay") {
+                            facts("Relay" to relay.address, "Estado" to relayStateLabel(relay.state))
+                            val connected = relay.state as? RelayState.Connected
+                            connected?.let {
+                                facts("Trackers fuera de casa" to it.trackerUrl)
+                                it.webUrl?.let { url -> facts("App web fuera de casa" to url) }
+                            }
+                            p("muted small") {
+                                +"El relay pasa las conexiones de los Trackers sin abrirlas: fijaron la clave de este servidor, así que no puede leer ni falsificar lo que envían. Los Trackers ya emparejados aprenden su dirección solos en su siguiente comprobación diaria."
+                            }
+                            if (connected?.webUrl != null) {
+                                p("muted small") {
+                                    +"La app web por el relay no tiene esa protección: el navegador no fija ninguna clave, y quien controla el dominio del relay puede conseguir un certificado para ese nombre y hacerse pasar por esta página. Úsala solo con un relay tuyo."
+                                }
+                            }
+                        }
+                    }
                     card("Cifrado de extremo a extremo") {
                         if (key == null) {
                             p("error") { +"La clave de cifrado no está disponible: los Trackers no enviarán nada hasta que vuelva." }
@@ -128,6 +151,16 @@ internal fun Route.serverRoutes(deps: WebDependencies, assets: Assets) {
                             webhook.lastError?.let { p("error small") { +"Último error: $it" } }
                         }
                     }
+                    peers?.let {
+                        card("Servidores emparejados") {
+                            if (it.isEmpty()) {
+                                p("muted small") { +"Ninguno. Dos servidores emparejados comparten sus dispositivos y posiciones cada minuto." }
+                            } else {
+                                ul("plain") { it.forEach { peer -> li { +"${peer.name} · ${peerStateLabel(peer, ctx.now)}" } } }
+                            }
+                            p { a(href = "/peers", classes = "button secondary") { +"Administrar" } }
+                        }
+                    }
                     card("Cuentas de la app web") {
                         ul("plain") {
                             accounts.forEach { li { +"${it.name} · creada el ${date(it.createdAt, ctx.zone)}" } }
@@ -149,14 +182,14 @@ internal fun Route.serverRoutes(deps: WebDependencies, assets: Assets) {
     }
 }
 
-private fun FlowContent.card(title: String, content: FlowContent.() -> Unit) {
+internal fun FlowContent.card(title: String, content: FlowContent.() -> Unit) {
     section("card") {
         h2 { +title }
         content()
     }
 }
 
-private fun FlowContent.facts(vararg rows: Pair<String, String>) {
+internal fun FlowContent.facts(vararg rows: Pair<String, String>) {
     dl("facts") {
         rows.forEach { (term, value) ->
             dt { +term }

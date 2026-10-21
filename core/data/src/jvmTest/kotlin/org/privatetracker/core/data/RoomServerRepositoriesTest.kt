@@ -70,7 +70,7 @@ class RoomServerRepositoriesTest {
     @BeforeEach
     fun setUp() {
         database = ServerDatabase.inMemory()
-        devices = RoomDeviceRepository(database.devices())
+        devices = RoomDeviceRepository(database)
         sessions = RoomSessionRepository(database.sessions(), database.devices())
         val locations = RoomLocationRepository(database.locations(), database.devices(), database.sessions())
         val transactions = RoomTransactionRunner(database)
@@ -79,14 +79,14 @@ class RoomServerRepositoriesTest {
         registerDevice = RegisterOrUpdateDevice(
             devices, config, sessionTracker, FakeSignatureVerifier, verifySignature, InMemoryPairingTickets(), transactions, clock,
         )
-        setApproval = SetDeviceApproval(devices, transactions)
+        setApproval = SetDeviceApproval(devices, transactions, clock)
         ingest = IngestLocationBatch(
             devices, locations, sessions, config, sessionTracker, LocationValidator(clock), transactions, clock,
             EvaluateGeofences(InMemoryGeofences(), RecordingGeofenceAlerts(), clock), RecordingGeofenceAlerts(),
         )
         purge = PurgeExpiredLocations(locations, config, clock)
         closeInactive = CloseInactiveSessions(sessions, sessionTracker, config, transactions, clock)
-        remove = RemoveDevice(devices)
+        remove = RemoveDevice(devices, clock)
     }
 
     @AfterEach

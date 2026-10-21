@@ -13,6 +13,10 @@ import org.privatetracker.core.domain.model.GeofenceState
 import org.privatetracker.core.domain.model.Location
 import org.privatetracker.core.domain.model.LocationId
 import org.privatetracker.core.domain.model.PairingTicket
+import org.privatetracker.core.domain.model.Peer
+import org.privatetracker.core.domain.model.PeerTicket
+import org.privatetracker.core.domain.model.RemovedDevice
+import org.privatetracker.core.domain.model.SyncCursor
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.SessionId
 import org.privatetracker.core.domain.model.StoredEncryptionKey
@@ -33,8 +37,11 @@ interface DeviceRepository {
     suspend fun update(device: Device)
     suspend fun setLastLocation(id: DeviceId, locationId: LocationId)
 
-    /** Deletes the device together with its locations and sessions. Returns false if it did not exist. */
-    suspend fun delete(id: DeviceId): Boolean
+    /**
+     * Deletes the device together with its locations and sessions, and remembers it was removed at
+     * [at], so paired servers remove it too (1.0). Returns false if it did not exist.
+     */
+    suspend fun delete(id: DeviceId, at: Instant): Boolean
 }
 
 interface LocationRepository {
@@ -152,3 +159,67 @@ interface WebSessionRepository {
     /** Drops the sessions that ended before [now]. Returns how many. */
     suspend fun deleteExpired(now: Instant): Int
 }
+
+/** Servers this one is paired with (1.0), by their identity key. */
+interface PeerRepository {
+    fun observeAll(): Flow<List<Peer>>
+    suspend fun all(): List<Peer>
+    suspend fun get(publicKey: String): Peer?
+    suspend fun getByLabel(label: String): Peer?
+
+    /** Adds [peer], or for a key already paired takes its name and addresses, keeping how far the two got. */
+    suspend fun save(peer: Peer)
+
+    /** Replaces the peer with [transform]'s result. False when no peer has that key any more. */
+    suspend fun update(publicKey: String, transform: (Peer) -> Peer): Boolean
+    suspend fun delete(publicKey: String): Boolean
+}
+
+/**
+ * Tickets of invites for other servers (1.0), in memory like the trackers' ones and apart from them:
+ * inviting a server does not withdraw a tracker's QR. One is open at a time.
+ */
+interface PeerTicketStore {
+    fun issue(ticket: PeerTicket)
+    fun get(id: String): PeerTicket?
+
+    /** Marks [id] as used by the server with [publicKey]. True also when that server used it already. */
+    fun consume(id: String, publicKey: String): Boolean
+    fun withdraw(id: String)
+    fun observe(id: String): Flow<PeerTicket?>
+}
+
+/**
+ * This server's own changes in the order it made them, and how it takes in a paired server's (1.0).
+ * Meant to run inside the caller's transaction, where what it reads and writes stays consistent.
+ */
+interface SyncRepository {
+    /**
+     * Devices changed and devices removed after [after] in this server's numbering of device changes,
+     * oldest first, at most [limit] of both together.
+     */
+    suspend fun deviceChangesAfter(after: Long, limit: Int): DeviceChanges
+
+    /** This server's locations after [after] in its own numbering, oldest first, but those that came from [peer]. */
+    suspend fun locationsAfter(after: Long, peer: String, limit: Int): LocationChanges
+
+    /** How far this server has numbered its own locations and device changes, ever. */
+    suspend fun numbering(): SyncCursor
+
+    /** When [id] was removed, if it was, here or on a paired server. */
+    suspend fun removal(id: DeviceId): RemovedDevice?
+
+    /** Writes [device] as an exchange settled it: inserted, or every field replaced. */
+    suspend fun putDevice(device: Device)
+
+    /** Removes the device if present and remembers the removal, unless a later one is remembered already. */
+    suspend fun remove(removal: RemovedDevice)
+
+    /** Stores a location from [peer] unless the device already has it. True when it was new. */
+    suspend fun insertLocation(location: Location, peer: String): Boolean
+}
+
+/** [upTo]: where the next call starts. [complete]: nothing was left out for [limit][SyncRepository.deviceChangesAfter]. */
+data class DeviceChanges(val devices: List<Device>, val removed: List<RemovedDevice>, val upTo: Long, val complete: Boolean)
+
+data class LocationChanges(val locations: List<Location>, val upTo: Long, val complete: Boolean)

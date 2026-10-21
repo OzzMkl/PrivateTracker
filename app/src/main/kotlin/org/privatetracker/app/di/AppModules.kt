@@ -246,7 +246,7 @@ object DomainModule {
     fun observeDeviceDetail(devices: DeviceRepository, sessions: SessionRepository, config: ServerConfigRepository, clock: Clock) =
         ObserveDeviceDetail(devices, sessions, config, clock)
 
-    @Provides fun renameDevice(devices: DeviceRepository, transactions: TransactionRunner) = RenameDevice(devices, transactions)
+    @Provides fun renameDevice(devices: DeviceRepository, transactions: TransactionRunner, clock: Clock) = RenameDevice(devices, transactions, clock)
 
     @Provides fun getDeviceTrack(devices: DeviceRepository, locations: LocationRepository) = GetDeviceTrack(devices, locations)
 
@@ -254,10 +254,10 @@ object DomainModule {
     fun exportDeviceHistory(devices: DeviceRepository, locations: LocationRepository, clock: Clock) =
         ExportDeviceHistory(devices, locations, clock)
 
-    @Provides fun removeDevice(devices: DeviceRepository) = RemoveDevice(devices)
+    @Provides fun removeDevice(devices: DeviceRepository, clock: Clock) = RemoveDevice(devices, clock)
 
     @Provides
-    fun setDeviceApproval(devices: DeviceRepository, transactions: TransactionRunner) = SetDeviceApproval(devices, transactions)
+    fun setDeviceApproval(devices: DeviceRepository, transactions: TransactionRunner, clock: Clock) = SetDeviceApproval(devices, transactions, clock)
 
     @Provides
     fun createPairingInvite(tickets: PairingTicketStore, serverKeys: ServerKeys, config: ServerConfigRepository, clock: Clock) =
@@ -322,9 +322,10 @@ object DomainModule {
 
     @Provides fun verifyServerIdentity(gateway: ServerGateway, verifier: SignatureVerifier) = VerifyServerIdentity(gateway, verifier)
 
+    /** With the settings: the addresses the server signs for (a relay's, from 1.0) become the tracker's. */
     @Provides
-    fun getServerEncryptionKey(state: TrackerStateRepository, verifyServer: VerifyServerIdentity, clock: Clock) =
-        GetServerEncryptionKey(state, verifyServer, clock)
+    fun getServerEncryptionKey(state: TrackerStateRepository, verifyServer: VerifyServerIdentity, clock: Clock, config: TrackerConfigRepository) =
+        GetServerEncryptionKey(state, verifyServer, clock, config)
 
     @Provides
     fun pairWithServer(verifyServer: VerifyServerIdentity, config: TrackerConfigRepository, register: RegisterDevice, clock: Clock) =

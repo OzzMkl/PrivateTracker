@@ -31,7 +31,30 @@ data class Device(
     /** ECDSA P-256 key the device signs with, as Base64 X.509 SubjectPublicKeyInfo. Null for devices that 0.1 registered. */
     val publicKey: String? = null,
     val approval: DeviceApproval = DeviceApproval.PENDING,
+    /**
+     * When the device last changed what it is (name, version, key) or the owner changed its approval,
+     * on whichever paired server it happened (1.0): the latest change wins on all of them. Null for
+     * devices from before 1.0, which count as changed when they were created.
+     */
+    val updatedAt: Instant? = null,
+    /**
+     * When the owner last decided on it (approved, rejected), on whichever paired server (1.0). Apart
+     * from [updatedAt], so a tracker checking in with a new version never undoes a decision made
+     * meanwhile on another server. Null before 1.0.
+     */
+    val approvalChangedAt: Instant? = null,
 ) {
+    /** For comparing changes to the device's details between paired servers. */
+    val changedAt: Instant get() = updatedAt ?: createdAt
+
+    /** For comparing the owner's decisions between paired servers. */
+    val approvalDecidedAt: Instant get() = approvalChangedAt ?: changedAt
+
+    /** The same name, platform, versions and key: what the tracker itself reports. */
+    fun sameDetailsAs(other: Device): Boolean =
+        name == other.name && platform == other.platform && appVersion == other.appVersion &&
+            protocolVersion == other.protocolVersion && publicKey == other.publicKey
+
     /**
      * Waiting for the owner's decision. A device without a key (registered by 0.1) is not: approving it
      * would mean nothing, since its next registration brings a key and starts the approval over.

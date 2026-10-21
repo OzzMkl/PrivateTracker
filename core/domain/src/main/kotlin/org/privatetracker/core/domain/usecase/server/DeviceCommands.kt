@@ -4,6 +4,7 @@ import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.common.result.asFailure
 import org.privatetracker.core.common.result.asSuccess
+import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.port.TransactionRunner
@@ -14,12 +15,13 @@ import org.privatetracker.core.domain.validation.validateDeviceName
 class RenameDevice(
     private val devices: DeviceRepository,
     private val transaction: TransactionRunner,
+    private val clock: Clock,
 ) {
     suspend operator fun invoke(id: DeviceId, name: String): Outcome<Unit> {
         validateDeviceName("name", name)?.let { return DomainError.Validation(listOf(it)).asFailure() }
         return transaction.run<Outcome<Unit>> {
             val device = devices.get(id) ?: return@run DomainError.DeviceNotFound.asFailure()
-            devices.update(device.copy(name = name.trim()))
+            devices.update(device.copy(name = name.trim(), updatedAt = clock.now()))
             Unit.asSuccess()
         }
     }
@@ -32,17 +34,18 @@ class RenameDevice(
 class SetDeviceApproval(
     private val devices: DeviceRepository,
     private val transaction: TransactionRunner,
+    private val clock: Clock,
 ) {
     suspend operator fun invoke(id: DeviceId, approval: DeviceApproval): Outcome<Unit> =
         transaction.run<Outcome<Unit>> {
             val device = devices.get(id) ?: return@run DomainError.DeviceNotFound.asFailure()
-            devices.update(device.copy(approval = approval))
+            if (device.approval != approval) devices.update(device.copy(approval = approval, approvalChangedAt = clock.now()))
             Unit.asSuccess()
         }
 }
 
-/** Forgets a device with its locations and sessions. */
-class RemoveDevice(private val devices: DeviceRepository) {
+/** Forgets a device with its locations and sessions, here and, from 1.0, on every paired server. */
+class RemoveDevice(private val devices: DeviceRepository, private val clock: Clock) {
     suspend operator fun invoke(id: DeviceId): Outcome<Unit> =
-        if (devices.delete(id)) Unit.asSuccess() else DomainError.DeviceNotFound.asFailure()
+        if (devices.delete(id, clock.now())) Unit.asSuccess() else DomainError.DeviceNotFound.asFailure()
 }

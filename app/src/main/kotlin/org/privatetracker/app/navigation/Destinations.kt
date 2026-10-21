@@ -41,6 +41,15 @@ import org.privatetracker.core.designsystem.R as DesignR
 /** Scanning a server's QR code, or confirming the pairing [link] a camera app opened. */
 @Serializable data class TrackerPairingKey(val link: String? = null) : NavKey
 
+/** The servers this one is paired with (1.0). */
+@Serializable data object PeersKey : NavKey
+
+/** This server's invite for another one. */
+@Serializable data object PeerInviteKey : NavKey
+
+/** Reading another server's invite, or confirming the [link] a camera app opened. */
+@Serializable data class PeerJoinKey(val link: String? = null) : NavKey
+
 /** The tabs of the bottom bar. Each one starts its own back stack. */
 enum class TopLevelDestination(val key: NavKey, @StringRes val label: Int) {
     MAP(MapKey, R.string.nav_map),

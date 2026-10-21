@@ -8,9 +8,10 @@ import org.privatetracker.core.domain.model.EncryptionKey
 import org.privatetracker.core.domain.model.StoredEncryptionKey
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.protocol.crypto.EcdsaP256
+import org.privatetracker.server.hostkeys.OwnerOnly
+import org.privatetracker.server.hostkeys.SelfSignedCertificate
 import org.privatetracker.server.linux.keys.FileEncryptionKeyVault
 import org.privatetracker.server.linux.keys.FileServerKeys
-import org.privatetracker.server.linux.keys.SelfSignedCertificate
 import org.privatetracker.server.linux.store.JsonFileEncryptionKeyRepository
 import java.nio.file.Files
 import java.nio.file.Path
@@ -56,7 +57,7 @@ class KeyFilesTest {
         val key = first.publicKey()
         val signature = first.sign("hola".encodeToByteArray())
 
-        assertEquals(DataDirectory.OWNER_ONLY_FILE, mode(file))
+        assertEquals(OwnerOnly.FILE, mode(file))
         assertTrue(EcdsaP256.verify(key, "hola".encodeToByteArray(), signature))
         assertEquals(key, FileServerKeys(file, clock).publicKey())
         // The TLS key is that same key.
@@ -83,7 +84,7 @@ class KeyFilesTest {
 
         vault.destroy(dropped.protectedPrivateKey)
 
-        assertEquals(DataDirectory.OWNER_ONLY_FILE, mode(file))
+        assertEquals(OwnerOnly.FILE, mode(file))
         val reopened = FileEncryptionKeyVault(file)
         assertEquals("EC", reopened.privateKey(kept.protectedPrivateKey).algorithm)
         assertFailsWith<DeviceKeyException> { reopened.privateKey(dropped.protectedPrivateKey) }
@@ -110,7 +111,7 @@ class KeyFilesTest {
 
         repository.update { it + stored }
 
-        assertEquals(DataDirectory.OWNER_ONLY_FILE, mode(file))
+        assertEquals(OwnerOnly.FILE, mode(file))
         assertEquals(listOf(stored), JsonFileEncryptionKeyRepository(file).get())
     }
 }

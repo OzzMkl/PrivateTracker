@@ -1,9 +1,12 @@
 package org.privatetracker.core.database.server
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /** Devices joined with their last location; the join needs no grouping or MAX per device. */
@@ -44,12 +47,13 @@ interface DeviceDao {
     @Insert
     suspend fun insert(device: DeviceEntity): Long
 
-    /** Updates what a device reports about itself and its approval; never touches created_at or last_location_id. */
+    /** Updates what a device reports about itself and its approval; never touches last_location_id. */
     @Query(
         """
         UPDATE devices
         SET name = :name, platform = :platform, app_version = :appVersion, protocol_version = :protocolVersion,
-            public_key = :publicKey, last_seen_at = :lastSeenAt, approval = :approval
+            public_key = :publicKey, created_at = :createdAt, last_seen_at = :lastSeenAt, approval = :approval,
+            updated_at = :updatedAt, approval_changed_at = :approvalChangedAt, change_seq = :changeSeq
         WHERE device_uid = :uid
         """,
     )
@@ -60,8 +64,12 @@ interface DeviceDao {
         appVersion: String?,
         protocolVersion: Int,
         publicKey: String?,
+        createdAt: Long,
         lastSeenAt: Long?,
         approval: String,
+        updatedAt: Long?,
+        approvalChangedAt: Long?,
+        changeSeq: Long,
     ): Int
 
     @Query(
@@ -155,4 +163,80 @@ interface SessionDao {
         appVersion: String?,
         locationsReceived: Int,
     ): Int
+}
+
+/** A location with the public id of its device, for a paired server. */
+data class SyncLocationRow(
+    @Embedded val location: LocationEntity,
+    @ColumnInfo(name = "device_uid") val deviceUid: String,
+)
+
+/** 1.0: what exchanges between paired servers read and write, apart from the device and location tables' own DAOs. */
+@Dao
+interface SyncDao {
+    /** Devices from before 1.0 all have 0: each takes its row id, so they page like any change. */
+    @Query("UPDATE devices SET change_seq = id")
+    suspend fun numberDevicesById()
+
+    /** The counter goes on from the highest number [numberDevicesById] gave. */
+    @Query("INSERT INTO sync_counters (name, value) VALUES (:name, (SELECT COALESCE(MAX(id), 0) FROM devices))")
+    suspend fun startCounterAfterDevices(name: String)
+
+    /** The highest location id ever given, deleted rows included; null before the first location. */
+    @Query("SELECT seq FROM sqlite_sequence WHERE name = 'locations'")
+    suspend fun locationSequence(): Long?
+
+    @Query("UPDATE sync_counters SET value = value + 1 WHERE name = :name")
+    suspend fun incrementCounter(name: String)
+
+    @Query("SELECT value FROM sync_counters WHERE name = :name")
+    suspend fun counter(name: String): Long?
+
+    @Query("SELECT * FROM devices WHERE change_seq > :after ORDER BY change_seq LIMIT :limit")
+    suspend fun devicesChangedAfter(after: Long, limit: Int): List<DeviceEntity>
+
+    @Query("SELECT * FROM removed_devices WHERE change_seq > :after ORDER BY change_seq LIMIT :limit")
+    suspend fun removalsAfter(after: Long, limit: Int): List<RemovedDeviceEntity>
+
+    @Query("SELECT * FROM removed_devices WHERE device_uid = :uid")
+    suspend fun removal(uid: String): RemovedDeviceEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putRemoval(removal: RemovedDeviceEntity)
+
+    /** A range scan of the primary key; the rows from [peer] are skipped, never sent back where they came from. */
+    @Query(
+        """
+        SELECT l.*, d.device_uid AS device_uid FROM locations l
+        JOIN devices d ON d.id = l.device_id
+        WHERE l.id > :after AND (l.from_peer IS NULL OR l.from_peer != :peer)
+        ORDER BY l.id
+        LIMIT :limit
+        """,
+    )
+    suspend fun locationsAfter(after: Long, peer: Long, limit: Int): List<SyncLocationRow>
+
+    @Query("SELECT COALESCE(MAX(id), 0) FROM locations")
+    suspend fun lastLocationId(): Long
+
+    @Query("SELECT * FROM peers ORDER BY paired_at, id")
+    fun observePeers(): Flow<List<PeerEntity>>
+
+    @Query("SELECT * FROM peers ORDER BY paired_at, id")
+    suspend fun peers(): List<PeerEntity>
+
+    @Query("SELECT * FROM peers WHERE public_key = :publicKey")
+    suspend fun peer(publicKey: String): PeerEntity?
+
+    @Query("SELECT * FROM peers WHERE label = :label")
+    suspend fun peerByLabel(label: String): PeerEntity?
+
+    @Insert
+    suspend fun insertPeer(peer: PeerEntity): Long
+
+    @Update
+    suspend fun updatePeer(peer: PeerEntity): Int
+
+    @Query("DELETE FROM peers WHERE public_key = :publicKey")
+    suspend fun deletePeer(publicKey: String): Int
 }

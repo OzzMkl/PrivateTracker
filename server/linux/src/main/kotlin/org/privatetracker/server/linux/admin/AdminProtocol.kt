@@ -53,6 +53,23 @@ sealed interface AdminRequest {
 
     @Serializable @SerialName("remove-user")
     data class RemoveUser(val name: String) : AdminRequest
+
+    // Paired servers (1.0).
+
+    @Serializable @SerialName("peers")
+    data object Peers : AdminRequest
+
+    /** Like [Pair]: the invite, then how it ended, on one connection; closing it withdraws the invite. */
+    @Serializable @SerialName("peer-invite")
+    data object PeerInvite : AdminRequest
+
+    /** [link]: the invite another server showed, `privatetracker://peer?...`. */
+    @Serializable @SerialName("peer-join")
+    data class PeerJoin(val link: String) : AdminRequest
+
+    /** [peer]: a paired server's exact name or its fingerprint. */
+    @Serializable @SerialName("peer-remove")
+    data class PeerRemove(val peer: String) : AdminRequest
 }
 
 @Serializable
@@ -78,6 +95,11 @@ sealed interface AdminReply {
         val webPort: Int? = null,
         val webCertificateSha256: String? = null,
         val webAccounts: Int = 0,
+        /** Null without a relay. */
+        val relay: String? = null,
+        val relayState: String? = null,
+        val relayUrl: String? = null,
+        val peers: Int = 0,
     ) : AdminReply
 
     @Serializable @SerialName("devices")
@@ -97,7 +119,23 @@ sealed interface AdminReply {
 
     @Serializable @SerialName("users")
     data class Users(val users: List<UserRow>) : AdminReply
+
+    @Serializable @SerialName("peers")
+    data class Peers(val peers: List<PeerRow>) : AdminReply
+
+    @Serializable @SerialName("peer-joined")
+    data class PeerJoined(val peer: PeerRow) : AdminReply
 }
+
+@Serializable
+data class PeerRow(
+    val name: String,
+    val fingerprint: String,
+    val addresses: List<String>,
+    val pairedAtMillis: Long,
+    val lastExchangeAtMillis: Long?,
+    val lastError: String?,
+)
 
 @Serializable
 data class UserRow(val name: String, val createdAtMillis: Long)

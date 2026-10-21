@@ -68,7 +68,7 @@ private class ServerFixture(config: ServerConfig = ServerConfig()) {
     val createInvite = CreatePairingInvite(tickets, FakeServerKeys(), this.config, clock)
     val observePaired = ObservePairedDevice(tickets, store)
     val authenticate = AuthenticateDevice(store, verifySignature)
-    val setApproval = SetDeviceApproval(store, ImmediateTransactionRunner)
+    val setApproval = SetDeviceApproval(store, ImmediateTransactionRunner, clock)
     val geofences = InMemoryGeofences(store)
     val alerts = RecordingGeofenceAlerts()
     val ingest = IngestLocationBatch(
@@ -81,7 +81,7 @@ private class ServerFixture(config: ServerConfig = ServerConfig()) {
     val closeInactive = CloseInactiveSessions(store, sessionTracker, this.config, ImmediateTransactionRunner, clock)
     val closeAll = CloseAllSessions(store, sessionTracker, ImmediateTransactionRunner, clock)
     val purge = PurgeExpiredLocations(store, this.config, clock)
-    val remove = RemoveDevice(store)
+    val remove = RemoveDevice(store, clock)
     private var nonces = 0
 
     /** A request of [deviceId] signed now with [publicKey], each with a fresh nonce. */

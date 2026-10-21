@@ -15,7 +15,11 @@ import org.privatetracker.core.database.server.GeofenceEventEntity
 import org.privatetracker.core.database.server.GeofenceStateEntity
 import org.privatetracker.core.database.server.LocationDao
 import org.privatetracker.core.database.server.LocationEntity
+import org.privatetracker.core.database.server.PeerEntity
+import org.privatetracker.core.database.server.RemovedDeviceEntity
 import org.privatetracker.core.database.server.SessionDao
+import org.privatetracker.core.database.server.SyncCounterEntity
+import org.privatetracker.core.database.server.SyncDao
 import org.privatetracker.core.database.tracker.OutboxDao
 import org.privatetracker.core.database.tracker.OutboxLocationEntity
 
@@ -33,14 +37,19 @@ import org.privatetracker.core.database.tracker.OutboxLocationEntity
         GeofenceDeviceEntity::class,
         GeofenceStateEntity::class,
         GeofenceEventEntity::class,
+        PeerEntity::class,
+        RemovedDeviceEntity::class,
+        SyncCounterEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
     autoMigrations = [
         // 0.2: devices.approval.
         AutoMigration(from = 1, to = 2),
         // 0.7: geofences, their devices, detection states and events; new tables only.
         AutoMigration(from = 2, to = 3),
+        // 1.0: paired servers, removed devices, change numbers; new tables and nullable or defaulted columns.
+        AutoMigration(from = 3, to = 4),
     ],
 )
 @ConstructedBy(ServerDatabaseConstructor::class)
@@ -49,6 +58,7 @@ abstract class ServerDatabase : RoomDatabase() {
     abstract fun locations(): LocationDao
     abstract fun sessions(): SessionDao
     abstract fun geofences(): GeofenceDao
+    abstract fun sync(): SyncDao
 
     companion object {
         const val NAME = "server.db"

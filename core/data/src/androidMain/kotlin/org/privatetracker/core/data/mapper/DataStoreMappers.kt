@@ -65,6 +65,9 @@ internal fun ServerConfigData.toDomain() = ServerConfig(
     maxBatchSize = maxBatchSize,
     exposeReadApi = exposeReadApi,
     advertiseOnLan = advertiseOnLan,
+    relayAddress = relayAddress,
+    relayFingerprint = relayFingerprint,
+    relayWeb = relayWeb,
 )
 
 internal fun ServerConfig.toData() = ServerConfigData(
@@ -78,6 +81,9 @@ internal fun ServerConfig.toData() = ServerConfigData(
     maxBatchSize = maxBatchSize,
     exposeReadApi = exposeReadApi,
     advertiseOnLan = advertiseOnLan,
+    relayAddress = relayAddress,
+    relayFingerprint = relayFingerprint,
+    relayWeb = relayWeb,
 )
 
 internal fun RegistrationData.toDomain() = TrackerRegistration(serverUrl, maxBatchSize, registeredAtMillis.toInstant())
@@ -98,10 +104,10 @@ internal fun Location.toRecordedData() =
     RecordedLocationData(id.value, deviceId.value, latitude, longitude, accuracyM, recordedAt.millis())
 
 internal fun TrustedEncryptionKeyData.toDomain() =
-    TrustedEncryptionKey(EncryptionKey(id, publicKey, useUntilMillis.toInstant()), serverKey)
+    TrustedEncryptionKey(EncryptionKey(id, publicKey, useUntilMillis.toInstant()), serverKey, verifiedAtMillis?.toInstant())
 
 internal fun TrustedEncryptionKey.toData() =
-    TrustedEncryptionKeyData(key.id, key.publicKey, key.useUntil.millis(), serverKey)
+    TrustedEncryptionKeyData(key.id, key.publicKey, key.useUntil.millis(), serverKey, verifiedAt?.millis())
 
 // Server encryption keys
 

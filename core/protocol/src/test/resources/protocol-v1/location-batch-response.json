@@ -1,0 +1,14 @@
+{
+  "accepted": [
+    "b3e1f7a2-5c4d-4e8f-a1b2-000000000001"
+  ],
+  "duplicates": [],
+  "rejected": [
+    {
+      "id": "not-a-uuid",
+      "code": "INVALID_FIELD",
+      "detail": "id: invalid_format"
+    }
+  ],
+  "server_time": "2026-10-16T18:00:00Z"
+}

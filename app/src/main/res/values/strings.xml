@@ -7,4 +7,5 @@
     <string name="nav_settings">Ajustes</string>
     <string name="permissions_done">Listo</string>
     <string name="pairing_link_needs_tracker">Este teléfono no comparte su ubicación. Cambia el modo en Ajustes para emparejarlo con un servidor.</string>
+    <string name="pairing_link_needs_server">Esa es una invitación para emparejar servidores, y este teléfono no es servidor. Cambia el modo en Ajustes.</string>
 </resources>

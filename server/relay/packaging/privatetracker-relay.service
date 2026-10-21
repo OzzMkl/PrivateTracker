@@ -1,0 +1,49 @@
+# systemd unit for PrivateTracker Relay on a host without Docker. See README.md.
+#   sudo useradd --system --home-dir /var/lib/privatetracker-relay --shell /usr/sbin/nologin privatetracker-relay
+#   sudo cp -r build/install/privatetracker-relay /opt/
+#   sudo cp packaging/privatetracker-relay.service /etc/systemd/system/
+#   sudo systemctl enable --now privatetracker-relay
+[Unit]
+Description=PrivateTracker Relay
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+User=privatetracker-relay
+Group=privatetracker-relay
+ExecStart=/opt/privatetracker-relay/bin/privatetracker-relay serve --data /var/lib/privatetracker-relay
+Environment=PRIVATETRACKER_RELAY_DOMAIN=relay.example.org
+# Fingerprints of the servers it carries, separated by commas.
+Environment=PRIVATETRACKER_RELAY_ALLOW=9E9D-7678-D67D-F283
+# Port 443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+StateDirectory=privatetracker-relay
+StateDirectoryMode=0700
+UMask=0077
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

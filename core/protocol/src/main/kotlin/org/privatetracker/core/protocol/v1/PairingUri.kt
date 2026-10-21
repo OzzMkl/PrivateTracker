@@ -19,10 +19,13 @@ import java.util.Base64
 object PairingUri {
     const val SCHEME = "privatetracker"
     const val HOST = "pair"
+
+    /** 1.0: the same invite, for another server to pair with this one; a tracker never reads it. */
+    const val PEER_HOST = "peer"
     private const val VERSION = "1"
     private val TOKEN = Regex("^[A-Za-z0-9_-]{1,64}$")
 
-    fun format(invite: PairingInvite): String {
+    fun format(invite: PairingInvite, host: String = HOST): String {
         val parameters = buildList {
             add("v" to VERSION)
             add("name" to invite.serverName)
@@ -32,13 +35,13 @@ object PairingUri {
             add("secret" to invite.secret)
             add("expires" to invite.expiresAt.epochSecond.toString())
         }
-        return "$SCHEME://$HOST?" + parameters.joinToString("&") { (name, value) -> "$name=${URLEncoder.encode(value, Charsets.UTF_8)}" }
+        return "$SCHEME://$host?" + parameters.joinToString("&") { (name, value) -> "$name=${URLEncoder.encode(value, Charsets.UTF_8)}" }
     }
 
-    /** Null when [raw] is not a pairing invite this version understands. */
-    fun parse(raw: String): PairingInvite? {
+    /** Null when [raw] is not a pairing invite for [host] that this version understands. */
+    fun parse(raw: String, host: String = HOST): PairingInvite? {
         val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return null
-        if (uri.scheme != SCHEME || uri.host != HOST) return null
+        if (uri.scheme != SCHEME || uri.host != host) return null
         val parameters = uri.rawQuery.orEmpty().split("&").filter { it.contains("=") }.map { part ->
             val name = part.substringBefore("=")
             name to runCatching { URLDecoder.decode(part.substringAfter("="), Charsets.UTF_8) }.getOrNull()

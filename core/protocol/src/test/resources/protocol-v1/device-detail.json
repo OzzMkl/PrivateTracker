@@ -1,0 +1,29 @@
+{
+  "device_id": "6f1c2a8e-3b7d-4c1e-9a52-0d8e7f4b9c21",
+  "name": "Pixel de Ana",
+  "platform": "ANDROID",
+  "status": "ONLINE",
+  "approval": "APPROVED",
+  "key_fingerprint": "3F9A-01BC-77D2-E410",
+  "created_at": "2026-10-01T12:00:00Z",
+  "app_version": "1.0.0",
+  "last_seen_at": "2026-10-16T17:59:30Z",
+  "last_location": {
+    "id": "b3e1f7a2-5c4d-4e8f-a1b2-000000000001",
+    "latitude": 19.4326,
+    "longitude": -99.1332,
+    "accuracy_m": 8.5,
+    "altitude_m": 2240.0,
+    "speed_mps": 1.25,
+    "bearing_deg": 90.0,
+    "provider": "gps",
+    "battery_pct": 80,
+    "is_mock": false,
+    "recorded_at": "2026-10-16T17:59:00Z"
+  },
+  "current_session": {
+    "started_at": "2026-10-16T08:00:00Z",
+    "last_activity_at": "2026-10-16T17:59:30Z",
+    "locations_received": 600
+  }
+}

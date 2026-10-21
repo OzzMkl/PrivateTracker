@@ -17,8 +17,21 @@ object ApiV1 {
     const val DEVICE = "$DEVICES/{$DEVICE_ID_PARAM}"
     const val LOCATIONS = "$DEVICE/locations"
 
+    /** 1.0: a server joins another with the invite it read (POST, [PeerSignature]). */
+    const val PEERS = "$BASE_PATH/peers"
+
+    /** 1.0: one exchange between paired servers (POST, [PeerSignature]): a batch each way. */
+    const val SYNC = "$BASE_PATH/sync"
+
     const val MAX_BATCH = MAX_BATCH_SIZE
     const val MAX_BODY_BYTES = 256 * 1024
+
+    /** A batch between servers: 500 locations come to about 150 KB, and this leaves room. */
+    const val MAX_SYNC_BODY_BYTES = 1024 * 1024
+
+    /** What one batch between servers may carry at most, whatever its sender's own limits. */
+    const val MAX_SYNC_LOCATIONS = 1000
+    const val MAX_SYNC_DEVICES = 1000
     const val PROBLEM_CONTENT_TYPE = "application/problem+json"
 
     fun devicePath(deviceId: String): String = "$DEVICES/$deviceId"
@@ -76,7 +89,10 @@ enum class ErrorCode {
     // End-to-end encryption, from 0.5 on.
     ENCRYPTION_REQUIRED,
     ENCRYPTION_KEY_UNKNOWN,
-    DECRYPTION_FAILED;
+    DECRYPTION_FAILED,
+
+    // Paired servers, from 1.0 on.
+    PEER_UNKNOWN;
 
     /** RFC 9457 `type`: a URN, since the project owns no domain to host problem pages. */
     val problemType: String get() = "urn:privatetracker:problem:" + name.lowercase().replace('_', '-')

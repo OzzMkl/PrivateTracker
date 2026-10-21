@@ -5,6 +5,7 @@ import org.privatetracker.core.common.result.AuthFailure
 import org.privatetracker.core.common.result.DomainError
 import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.common.result.Outcome
+import org.privatetracker.core.domain.model.MAX_ADVERTISED_ADDRESSES
 import org.privatetracker.core.domain.model.AppInfo
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DiscoveredServer
@@ -75,7 +76,7 @@ private class TrackerFixture(
     val record = RecordLocation(outbox, state, this.config, identity, FixedBattery(55), LocationValidator(clock), ids)
     val keys = FakeDeviceKeys()
     val verifyServer = VerifyServerIdentity(gateway, FakeSignatureVerifier)
-    val encryptionKeys = GetServerEncryptionKey(state, verifyServer, clock)
+    val encryptionKeys = GetServerEncryptionKey(state, verifyServer, clock, this.config)
     val register = RegisterDevice(gateway, this.config, state, identity, keys, verifyServer, encryptionKeys, AppInfo(Platform.ANDROID, "0.1.0"), clock)
     val upload = UploadPendingLocations(outbox, gateway, this.config, state, register, encryptionKeys, identity, clock)
     val pair = PairWithServer(verifyServer, this.config, register, clock)
@@ -606,7 +607,7 @@ class EndToEndEncryptionTest {
         assertEquals(UploadResult.Completed(sent = 1, rejected = 0, hasMore = false), fixture.upload())
 
         assertEquals(listOf("ENC-1", "ENC-1", "ENC-1"), fixture.gateway.sealedFor)
-        assertEquals(TrustedEncryptionKey(anEncryptionKey(1), FakeServerKeys.SERVER_KEY), fixture.state.encryptionKey)
+        assertEquals(TrustedEncryptionKey(anEncryptionKey(1), FakeServerKeys.SERVER_KEY, fixture.clock.now()), fixture.state.encryptionKey)
         // Only registering asked the server to prove itself; the key served both uploads.
         assertEquals(1, fixture.gateway.healthCalls.size)
     }
@@ -706,6 +707,73 @@ class EndToEndEncryptionTest {
         assertEquals(UploadResult.RetryLater(DomainError.EncryptionKeyUnknown), fixture.upload())
 
         assertEquals(1, fixture.outbox.count())
+    }
+
+    @Test
+    fun `a tracker learns the addresses its server signs for, keeping the one in use`() = runTest {
+        val fixture = TrackerFixture(
+            TrackerConfig(serverUrl = SERVER, deviceName = "Pixel de Ana", serverKey = FakeServerKeys.SERVER_KEY, serverAddresses = listOf(SERVER, "https://10.0.0.9:8787")),
+        )
+        fixture.gateway.advertisedAddresses = listOf("https://192.168.1.20:8787", "https://9e9d7678d67df283.relay.example.org", "http://not-tls:80", "ftp://x")
+        fixture.enqueue(1)
+
+        fixture.upload()
+
+        // The old LAN address the server no longer gives is gone; the relay's name is in; nothing but https.
+        assertEquals(listOf("https://192.168.1.20:8787", "https://9e9d7678d67df283.relay.example.org", SERVER), fixture.config.get().serverAddresses)
+    }
+
+    @Test
+    fun `addresses someone else signed fail the server's proof`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.gateway.advertisedAddresses = listOf("https://evil.example.org")
+        fixture.gateway.addressesSigner = fakePublicKey(DEVICE_B)
+        fixture.enqueue(1)
+
+        assertEquals(UploadResult.RetryLater(DomainError.ServerIdentityMismatch), fixture.upload())
+
+        assertEquals(emptyList(), fixture.config.get().serverAddresses)
+        assertTrue(fixture.gateway.sealedFor.isEmpty())
+    }
+
+    @Test
+    fun `the server proves itself again after a day, and its silence then costs nothing`() = runTest {
+        val fixture = TrackerFixture()
+        fixture.enqueue(1)
+        fixture.upload()
+        val checks = fixture.gateway.healthCalls.size
+
+        fixture.clock.advanceBy(Duration.ofHours(23))
+        fixture.enqueue(1)
+        fixture.upload()
+        assertEquals(checks, fixture.gateway.healthCalls.size)
+
+        fixture.clock.advanceBy(Duration.ofHours(2))
+        fixture.gateway.advertisedAddresses = listOf(SERVER, "https://9e9d7678d67df283.relay.example.org")
+        fixture.enqueue(1)
+        fixture.upload()
+        assertEquals(checks + 1, fixture.gateway.healthCalls.size)
+        assertEquals(listOf(SERVER, "https://9e9d7678d67df283.relay.example.org"), fixture.config.get().serverAddresses)
+
+        // A day later the health check finds nobody, but the remembered key still serves the upload that follows.
+        fixture.clock.advanceBy(Duration.ofHours(25))
+        fixture.gateway.healthResponses += Outcome.Failure(DomainError.Network.Unreachable)
+        fixture.enqueue(1)
+        assertEquals(UploadResult.Completed(sent = 1, rejected = 0, hasMore = false), fixture.upload())
+        assertEquals(checks + 2, fixture.gateway.healthCalls.size)
+        assertTrue(fixture.gateway.healthResponses.isEmpty())
+    }
+
+    @Test
+    fun `the address in use stays when the server lists as many as a tracker keeps`() = runTest {
+        val fixture = TrackerFixture()
+        val others = (1..MAX_ADVERTISED_ADDRESSES).map { "https://10.0.0.$it:8787" }
+        fixture.gateway.advertisedAddresses = others
+        fixture.enqueue(1)
+
+        fixture.upload()
+
+        assertEquals(others.take(MAX_ADVERTISED_ADDRESSES - 1) + SERVER, fixture.config.get().serverAddresses)
     }
 
     @Test

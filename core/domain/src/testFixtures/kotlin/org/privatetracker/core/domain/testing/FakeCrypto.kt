@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.PairingTicket
+import org.privatetracker.core.domain.model.PeerTicket
 import org.privatetracker.core.domain.model.SignedRequest
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.domain.port.DeviceKeys
@@ -15,6 +16,7 @@ import org.privatetracker.core.domain.port.NonceRegistry
 import org.privatetracker.core.domain.port.ServerKeys
 import org.privatetracker.core.domain.port.SignatureVerifier
 import org.privatetracker.core.domain.repository.PairingTicketStore
+import org.privatetracker.core.domain.repository.PeerTicketStore
 import java.security.MessageDigest
 import java.security.PrivateKey
 import java.time.Instant
@@ -52,8 +54,8 @@ object FakeSignatureVerifier : SignatureVerifier {
 
 /** Remembers every nonce forever; tests never run long enough for expiry to matter. */
 class InMemoryNonces : NonceRegistry {
-    private val seen = mutableSetOf<Pair<DeviceId, String>>()
-    override fun register(deviceId: DeviceId, nonce: String, expiresAt: Instant): Boolean = seen.add(deviceId to nonce)
+    private val seen = mutableSetOf<Pair<String, String>>()
+    override fun register(signer: String, nonce: String, expiresAt: Instant): Boolean = seen.add(signer to nonce)
 }
 
 /** A request from [deviceId] signed with [publicKey] at [signedAt]. */
@@ -100,6 +102,35 @@ class InMemoryPairingTickets : PairingTicketStore {
 
     override fun observe(id: String): Flow<PairingTicket?> = current.map { it?.takeIf { ticket -> ticket.id == id } }
 }
+
+/** Invites for other servers, one open at a time, like the server's store. */
+class InMemoryPeerTickets : PeerTicketStore {
+    private val current = MutableStateFlow<PeerTicket?>(null)
+
+    override fun issue(ticket: PeerTicket) {
+        current.value = ticket
+    }
+
+    override fun get(id: String): PeerTicket? = current.value?.takeIf { it.id == id }
+
+    override fun consume(id: String, publicKey: String): Boolean {
+        var consumed = false
+        current.update { ticket ->
+            consumed = ticket?.id == id && (ticket.usedBy == null || ticket.usedBy == publicKey)
+            if (consumed) ticket?.copy(usedBy = publicKey) else ticket
+        }
+        return consumed
+    }
+
+    override fun withdraw(id: String) {
+        current.update { if (it?.id == id && it.usedBy == null) null else it }
+    }
+
+    override fun observe(id: String): Flow<PeerTicket?> = current.map { it?.takeIf { ticket -> ticket.id == id } }
+}
+
+/** A fake server identity key, distinct per [name], that [FakeServerKeys] can sign for. */
+fun fakeServerKey(name: String): String = Base64.getEncoder().encodeToString("$FAKE_KEY_PREFIX-server-$name".encodeToByteArray())
 
 /**
  * Encryption keys as plain labels: key N is "fake-encryption-N", and its private half a [PrivateKey]

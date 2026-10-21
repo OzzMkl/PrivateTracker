@@ -50,7 +50,7 @@ class HistoryPerformanceTest {
 
     @Test
     fun thirtyDaysOfOneDeviceBecomeADrawableRouteWellUnderTwoSeconds() = runTest {
-        val devices = RoomDeviceRepository(database.devices())
+        val devices = RoomDeviceRepository(database)
         devices.insert(aDevice(DEVICE_A))
         devices.insert(aDevice(DEVICE_B, name = "Otro"))
         insertMonth(deviceKey = 1, minutes = MONTH_MINUTES)

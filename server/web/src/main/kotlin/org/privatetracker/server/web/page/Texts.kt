@@ -4,7 +4,10 @@ import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.DeviceStatus
 import org.privatetracker.core.domain.model.GeofenceTransition
+import org.privatetracker.core.domain.model.Peer
 import org.privatetracker.core.domain.model.Platform
+import org.privatetracker.core.domain.model.RelayRefusal
+import org.privatetracker.core.domain.model.RelayState
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -52,6 +55,31 @@ fun platformLabel(platform: Platform): String = when (platform) {
     Platform.LINUX -> "Linux"
     Platform.WEB -> "Web"
     Platform.OTHER -> "Otro"
+}
+
+/** How the tunnel to the relay is doing, in a few words. */
+fun relayStateLabel(state: RelayState): String = when (state) {
+    RelayState.Off -> "apagado"
+    RelayState.Connecting -> "conectando…"
+    is RelayState.Connected -> "conectado"
+    is RelayState.Refused -> when (state.reason) {
+        RelayRefusal.NOT_ALLOWED -> "el relay no acepta este servidor: agrega su huella a --allow del relay"
+        RelayRefusal.VERSION -> "el relay es de otra versión"
+    }
+    RelayState.KeyMismatch -> "el relay mostró otra clave: revisa la huella configurada"
+    is RelayState.Unreachable -> "sin conexión (${state.detail}); reintentando"
+}
+
+/** How a paired server is doing, from this server's side. */
+fun peerStateLabel(peer: Peer, now: Instant): String {
+    val last = peer.sync.lastExchangeAt
+    return when (peer.sync.lastError) {
+        null -> last?.let { "al día, " + relativeTime(it, now) } ?: "todavía sin intercambios"
+        "PEER_UNKNOWN" -> "ya no está emparejado con este servidor"
+        "SERVER_IDENTITY_MISMATCH" -> "en su dirección responde otro servidor"
+        "NETWORK_UNREACHABLE", "NETWORK_TIMEOUT" -> "no se le alcanza" + (last?.let { "; último intercambio " + relativeTime(it, now) } ?: "")
+        else -> "falló (${peer.sync.lastError})"
+    }
 }
 
 fun transitionLabel(transition: GeofenceTransition): String = when (transition) {

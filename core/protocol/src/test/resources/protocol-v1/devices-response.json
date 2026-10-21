@@ -1,0 +1,24 @@
+{
+  "devices": [
+    {
+      "device_id": "6f1c2a8e-3b7d-4c1e-9a52-0d8e7f4b9c21",
+      "name": "Pixel de Ana",
+      "status": "ONLINE",
+      "approval": "APPROVED",
+      "last_seen_at": "2026-10-16T17:59:30Z",
+      "last_location": {
+        "id": "b3e1f7a2-5c4d-4e8f-a1b2-000000000001",
+        "latitude": 19.4326,
+        "longitude": -99.1332,
+        "accuracy_m": 8.5,
+        "altitude_m": 2240.0,
+        "speed_mps": 1.25,
+        "bearing_deg": 90.0,
+        "provider": "gps",
+        "battery_pct": 80,
+        "is_mock": false,
+        "recorded_at": "2026-10-16T17:59:00Z"
+      }
+    }
+  ]
+}

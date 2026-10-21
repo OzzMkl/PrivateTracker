@@ -2,6 +2,7 @@ package org.privatetracker.server.linux
 
 import org.privatetracker.core.common.result.FieldViolation
 import org.privatetracker.core.domain.model.ServerConfig
+import org.privatetracker.core.domain.model.normalizeFingerprint
 import org.privatetracker.core.domain.validation.ServerConfigValidator
 import org.privatetracker.core.domain.validation.TrackerConfigValidator
 import org.privatetracker.server.linux.keys.PemFiles
@@ -103,10 +104,16 @@ fun serveSettings(arguments: Arguments, environment: Map<String, String>): Serve
         acceptNewDevices = yesNo("accept-new-devices", defaults.acceptNewDevices),
         // A host has no mDNS announcer yet; trackers find it by the URLs of their invite.
         advertiseOnLan = false,
+        relayAddress = setting("relay")?.trim()?.lowercase().orEmpty(),
+        relayFingerprint = setting("relay-fingerprint")?.let(::normalizeFingerprint).orEmpty(),
+        relayWeb = yesNo("relay-web", false),
     )
     ServerConfigValidator.validate(config).firstOrNull()?.let { throw UsageException(describe(it)) }
 
     val web = webSettings(::setting, config)
+    if (config.relayWeb && (config.relay == null || web == null)) {
+        throw UsageException("--relay-web pide un relay (--relay) y la app web encendida")
+    }
     val tiles = tiles(::setting)
     val webhook = webhookSettings(::setting)
 
@@ -173,6 +180,8 @@ private fun describe(violation: FieldViolation): String {
         "onlineThresholdSeconds" -> "--online-threshold"
         "retentionDays" -> "--retention-days"
         "serverUrl" -> "la URL"
+        "relayAddress" -> "--relay"
+        "relayFingerprint" -> "--relay-fingerprint"
         else -> violation.field
     }
     val rule = when (violation.rule) {

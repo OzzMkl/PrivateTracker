@@ -1,0 +1,20 @@
+{
+  "status": "ok",
+  "server_name": "Casa",
+  "server_version": "1.0.0",
+  "protocol_version": 1,
+  "server_time": "2026-10-16T18:00:00Z",
+  "server_key": "c2VydmVyLWtleQ==",
+  "signature": "c2lnbmF0dXJl",
+  "encryption_key": {
+    "id": "k1",
+    "public_key": "ZW5jcnlwdGlvbi1rZXk=",
+    "use_until": "2026-10-23T18:00:00Z",
+    "signature": "a2V5LXNpZ25hdHVyZQ=="
+  },
+  "addresses": [
+    "https://192.168.1.20:8787",
+    "https://9e9d7678d67df283.relay.example.org"
+  ],
+  "addresses_signature": "YWRkcmVzc2VzLXNpZ25hdHVyZQ=="
+}

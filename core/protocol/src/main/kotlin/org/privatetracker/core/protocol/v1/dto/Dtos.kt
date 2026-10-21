@@ -17,6 +17,9 @@ data class HealthResponse(
     val signature: String? = null,
     /** From 0.5: what trackers seal their requests for, signed with the server's key. */
     @SerialName("encryption_key") val encryptionKey: EncryptionKeyDto? = null,
+    /** From 1.0, with a challenge: where the server can be reached now, signed apart over the same challenge. */
+    val addresses: List<String>? = null,
+    @SerialName("addresses_signature") val addressesSignature: String? = null,
 )
 
 @Serializable
@@ -138,4 +141,80 @@ data class ProblemDetails(
     val detail: String? = null,
     val code: String,
     @SerialName("max_batch_size") val maxBatchSize: Int? = null,
+)
+
+// Paired servers, from 1.0 on.
+
+@Serializable
+data class JoinPeerRequest(
+    val ticket: String,
+    val name: String,
+    @SerialName("public_key") val publicKey: String,
+    val addresses: List<String> = emptyList(),
+    /** HMAC of the joining key with the invite's secret, which never travels. */
+    val proof: String,
+)
+
+@Serializable
+data class JoinPeerResponse(val name: String, val addresses: List<String> = emptyList())
+
+/** A position in the sender's own numbering of its locations and of its device changes. */
+@Serializable
+data class SyncCursorDto(val locations: Long, val devices: Long)
+
+@Serializable
+data class SyncDeviceDto(
+    @SerialName("device_id") val deviceId: String,
+    val name: String,
+    val platform: String,
+    @SerialName("app_version") val appVersion: String? = null,
+    @SerialName("protocol_version") val protocolVersion: Int,
+    @SerialName("public_key") val publicKey: String? = null,
+    val approval: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    /** When the owner last approved or rejected it: changes apart from the device's own details. */
+    @SerialName("approval_changed_at") val approvalChangedAt: String? = null,
+    @SerialName("last_seen_at") val lastSeenAt: String? = null,
+)
+
+@Serializable
+data class RemovedDeviceDto(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("removed_at") val removedAt: String,
+)
+
+/** A location as its tracker sent it, with its device and when the first server got it. */
+@Serializable
+data class SyncLocationDto(
+    @SerialName("device_id") val deviceId: String,
+    val id: String,
+    val latitude: Double,
+    val longitude: Double,
+    @SerialName("accuracy_m") val accuracyM: Float? = null,
+    @SerialName("altitude_m") val altitudeM: Double? = null,
+    @SerialName("speed_mps") val speedMps: Float? = null,
+    @SerialName("bearing_deg") val bearingDeg: Float? = null,
+    val provider: String? = null,
+    @SerialName("battery_pct") val batteryPct: Int? = null,
+    @SerialName("is_mock") val isMock: Boolean = false,
+    @SerialName("recorded_at") val recordedAt: String,
+    @SerialName("received_at") val receivedAt: String,
+)
+
+/** Both the request and the answer of [ApiV1.SYNC][org.privatetracker.core.protocol.v1.ApiV1.SYNC]. */
+@Serializable
+data class SyncMessageDto(
+    @SerialName("server_name") val serverName: String,
+    val addresses: List<String> = emptyList(),
+    /** How much of the receiver's data the sender has. */
+    val have: SyncCursorDto,
+    /** How far into its own data the sender went for this message. */
+    @SerialName("up_to") val upTo: SyncCursorDto,
+    val devices: List<SyncDeviceDto> = emptyList(),
+    @SerialName("removed_devices") val removedDevices: List<RemovedDeviceDto> = emptyList(),
+    val locations: List<SyncLocationDto> = emptyList(),
+    val more: Boolean = false,
+    /** The sender was restored from a backup and sends everything again: take [upTo] as is. */
+    val reset: Boolean = false,
 )

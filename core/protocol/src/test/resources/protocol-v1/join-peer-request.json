@@ -1,0 +1,9 @@
+{
+  "ticket": "t1",
+  "name": "Oficina",
+  "public_key": "cGVlci1rZXk=",
+  "addresses": [
+    "https://10.0.0.5:8787"
+  ],
+  "proof": "cHJvb2Y="
+}

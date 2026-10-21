@@ -18,16 +18,37 @@ import kotlinx.serialization.SerializationException
 import org.privatetracker.core.protocol.v1.ApiV1
 import org.privatetracker.core.protocol.v1.ErrorCode
 import org.privatetracker.core.protocol.v1.ProtocolJson
+import org.privatetracker.server.api.ServerDependencies
+import org.privatetracker.server.api.auth.peerLabelOrNull
 import kotlin.time.Duration.Companion.minutes
 
 internal val DEVICE_RATE_LIMIT = RateLimitName("device")
+internal val HEALTH_RATE_LIMIT = RateLimitName("health")
+internal val PEER_RATE_LIMIT = RateLimitName("peer")
 
-/** Per remote address and device; registration has no device in its path, so it counts per address. */
-internal fun Application.installRateLimiting(requestsPerMinute: Int) {
+/**
+ * Per client address and device; registration has no device in its path, so it counts per address.
+ * Health counts per address too: each answer to a challenge costs two signatures, and from 1.0 anyone
+ * who knows a server's relay name may ask.
+ */
+internal fun Application.installRateLimiting(deps: ServerDependencies) {
     install(RateLimit) {
         register(DEVICE_RATE_LIMIT) {
-            rateLimiter(limit = requestsPerMinute, refillPeriod = 1.minutes)
-            requestKey { call -> rateLimitKey(call.request.local.remoteAddress, call.parameters[ApiV1.DEVICE_ID_PARAM]) }
+            rateLimiter(limit = deps.requestsPerMinute, refillPeriod = 1.minutes)
+            requestKey { call -> rateLimitKey(call.clientAddress(deps), call.parameters[ApiV1.DEVICE_ID_PARAM]) }
+        }
+        register(HEALTH_RATE_LIMIT) {
+            rateLimiter(limit = deps.requestsPerMinute, refillPeriod = 1.minutes)
+            requestKey { call -> call.clientAddress(deps) }
+        }
+        // A paired server catching up sends a batch after another: per address and the server it says it
+        // is, but only a server this one knows; any other label counts against the address alone.
+        register(PEER_RATE_LIMIT) {
+            rateLimiter(limit = PEER_REQUESTS_PER_MINUTE, refillPeriod = 1.minutes)
+            requestKey { call ->
+                val label = call.peerLabelOrNull()?.takeIf { deps.answerPeerExchange?.knows(it) == true }
+                call.clientAddress(deps) + "|" + label.orEmpty()
+            }
         }
     }
 }
@@ -36,6 +57,9 @@ internal fun Application.installRateLimiting(requestsPerMinute: Int) {
  * The limit is charged before the signature is checked, so it must not be keyed on the device alone:
  * anyone could then use up a real tracker's budget with unsigned requests from another address.
  */
+/** Enough for the 50 batches a minute of catching up, from each side. */
+internal const val PEER_REQUESTS_PER_MINUTE = 120
+
 internal fun rateLimitKey(remoteAddress: String, deviceIdParam: String?): String =
     remoteAddress + "|" + deviceIdParam?.lowercase().orEmpty()
 
@@ -83,4 +107,17 @@ private val LOOPBACK = setOf("127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.
 /** True when the request comes from the phone itself. Proxy headers are deliberately ignored. */
 fun ApplicationCall.isLoopback(): Boolean = request.local.remoteAddress in LOOPBACK
 
-internal fun ApplicationCall.remoteAddressOrNull(): String? = request.local.remoteAddress.takeIf { it.isNotBlank() }
+/** The visitor a relay tunnel brought in on this connection, or null for any other connection. */
+private fun ApplicationCall.tunneledVisitor(deps: ServerDependencies): String? =
+    request.local.let { deps.tunneledVisitor(it.remoteAddress, it.remotePort) }
+
+/**
+ * The address a request counts against: the peer's own, or for a connection a relay tunnel opened on
+ * this machine, the visitor's as the relay saw it. Proxy headers are deliberately ignored.
+ */
+internal fun ApplicationCall.clientAddress(deps: ServerDependencies): String = tunneledVisitor(deps) ?: request.local.remoteAddress
+
+/** From the server itself, as [ServerDependencies.isLocalRequest] decides; never what a relay tunnel brought in from outside. */
+internal fun ApplicationCall.isLocal(deps: ServerDependencies): Boolean = deps.isLocalRequest(this) && tunneledVisitor(deps) == null
+
+internal fun ApplicationCall.remoteAddressOrNull(deps: ServerDependencies): String? = clientAddress(deps).takeIf { it.isNotBlank() }

@@ -232,14 +232,15 @@ class TrackerServerContractTest {
         val first = assertNotNull(tracker.state.encryptionKey).key
         val capturedUnderFirst = relay.lastLocationsRequest()
 
-        // A week later the server offers a new key, and the tracker takes it when its own copy ends.
+        // A week later the server offers a new key, made an hour before the first one ends; the tracker's
+        // daily check of the server (1.0) takes it before its own copy ends.
         clock.current = first.useUntil.minusSeconds(30)
-        assertEquals(UploadResult.Completed(sent = 2, rejected = 0, hasMore = false), recordAndUpload(2))
-        assertEquals(first, tracker.state.encryptionKey?.key)
-        clock.current = first.useUntil.plusSeconds(1)
         assertEquals(UploadResult.Completed(sent = 2, rejected = 0, hasMore = false), recordAndUpload(2))
         val second = assertNotNull(tracker.state.encryptionKey).key
         assertTrue(second.id != first.id)
+        clock.current = first.useUntil.plusSeconds(1)
+        assertEquals(UploadResult.Completed(sent = 2, rejected = 0, hasMore = false), recordAndUpload(2))
+        assertEquals(second, tracker.state.encryptionKey?.key)
 
         // The owner rotates now: the tracker is told its key is gone, fetches the new one, and resends.
         encryptionKeys.rotate()

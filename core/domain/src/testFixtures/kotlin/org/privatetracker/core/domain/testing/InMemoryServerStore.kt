@@ -75,8 +75,12 @@ class InMemoryServerStore : DeviceRepository, LocationRepository, SessionReposit
         changed()
     }
 
-    override suspend fun delete(id: DeviceId): Boolean = locked {
+    /** What [delete] remembered, for paired servers. */
+    val removals = mutableMapOf<DeviceId, Instant>()
+
+    override suspend fun delete(id: DeviceId, at: Instant): Boolean = locked {
         val removed = devices.remove(id) != null
+        if (removed) removals[id] = at
         lastLocationIds.remove(id)
         locations.keys.removeAll { it.first == id }
         sessions.values.removeAll { it.deviceId == id }

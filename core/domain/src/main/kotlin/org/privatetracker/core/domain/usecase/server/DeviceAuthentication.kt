@@ -8,11 +8,13 @@ import org.privatetracker.core.common.result.asSuccess
 import org.privatetracker.core.common.time.Clock
 import org.privatetracker.core.domain.model.Device
 import org.privatetracker.core.domain.model.DeviceApproval
+import org.privatetracker.core.domain.model.SignedPeerRequest
 import org.privatetracker.core.domain.model.SignedRequest
 import org.privatetracker.core.domain.port.NonceRegistry
 import org.privatetracker.core.domain.port.SignatureVerifier
 import org.privatetracker.core.domain.repository.DeviceRepository
 import java.time.Duration
+import java.time.Instant
 
 /**
  * Checks that a request is recent, signed by the holder of a given public key, and not seen before.
@@ -24,11 +26,18 @@ class VerifyRequestSignature(
     private val clock: Clock,
     private val maxAge: Duration = MAX_AGE,
 ) {
-    operator fun invoke(request: SignedRequest, publicKey: String): Outcome<Unit> {
-        if (Duration.between(request.signedAt, clock.now()).abs() > maxAge) return failure(AuthFailure.EXPIRED)
-        if (!verifier.verify(publicKey, request.signingInput, request.signature)) return failure(AuthFailure.INVALID)
+    operator fun invoke(request: SignedRequest, publicKey: String): Outcome<Unit> =
+        check(request.deviceId.value, request.signedAt, request.nonce, request.signingInput, request.signature, publicKey)
+
+    /** The same checks for a request a paired server signed (1.0). */
+    operator fun invoke(request: SignedPeerRequest, publicKey: String): Outcome<Unit> =
+        check(PEER_SIGNER + request.label, request.signedAt, request.nonce, request.signingInput, request.signature, publicKey)
+
+    private fun check(signer: String, signedAt: Instant, nonce: String, input: ByteArray, signature: ByteArray, publicKey: String): Outcome<Unit> {
+        if (Duration.between(signedAt, clock.now()).abs() > maxAge) return failure(AuthFailure.EXPIRED)
+        if (!verifier.verify(publicKey, input, signature)) return failure(AuthFailure.INVALID)
         // Past signedAt + maxAge the request is refused as expired, so the nonce can be forgotten then.
-        if (!nonces.register(request.deviceId, request.nonce, request.signedAt.plus(maxAge))) return failure(AuthFailure.REPLAYED)
+        if (!nonces.register(signer, nonce, signedAt.plus(maxAge))) return failure(AuthFailure.REPLAYED)
         return Unit.asSuccess()
     }
 
@@ -37,6 +46,9 @@ class VerifyRequestSignature(
     companion object {
         /** Same tolerance as for location timestamps: clocks of phones on automatic time agree far better. */
         val MAX_AGE: Duration = Duration.ofMinutes(5)
+
+        /** Device ids are UUIDs, so a server's label never takes one's nonces. */
+        private const val PEER_SIGNER = "peer:"
     }
 }
 

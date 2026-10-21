@@ -131,6 +131,16 @@ PRIVATETRACKER_ALERT_WEBHOOK=http://homeassistant.local:8123/api/webhook/private
 
 El formato es `ntfy` si el host es `ntfy.sh` o empieza con `ntfy.`, y JSON en los demás casos; `PRIVATETRACKER_ALERT_WEBHOOK_FORMAT` lo fija. `PRIVATETRACKER_ALERT_WEBHOOK_TOKEN` se envía como `Authorization: Bearer` (para un ntfy con control de acceso). El aviso lleva los nombres del dispositivo y de la geocerca, entrada o salida y la hora, **nunca coordenadas**; aun así, un tema público de ntfy.sh lo puede leer cualquiera que adivine su nombre, así que usa uno largo o tu propio ntfy. Cada aviso se intenta tres veces; la página **Servidor** muestra el último envío y el último error.
 
+## Desde fuera de casa: el relay
+
+Si los teléfonos no alcanzan este equipo fuera de casa y no quieres una VPN ni abrir puertos, usa un relay: un programa aparte, `privatetracker-relay`, en un equipo con dirección pública y dominio (un VPS). El servidor abre un túnel hacia él; los Trackers llegan al relay, que pasa su conexión cifrada por el túnel sin abrirla. Ver `server/relay/README.md`.
+
+```sh
+privatetracker-server serve --relay relay.example.org --relay-fingerprint 1A2B-3C4D-5E6F-7A8B
+```
+
+El dueño del relay agrega la huella de este servidor a su lista. Los códigos QR nuevos llevan la dirección del relay y los Trackers ya emparejados la aprenden solos en su comprobación diaria. `status` dice si el túnel está conectado y por qué dirección llegan los Trackers. Con `--relay-web true`, también la app web queda en `https://web-<huella>.relay.example.org`; úsalo solo con un relay tuyo, porque el navegador no fija la clave del servidor como los Trackers y quien controla el dominio del relay podría hacerse pasar por la página.
+
 ## Órdenes
 
 | Orden | Qué hace |
@@ -173,6 +183,9 @@ Cada opción se puede dar como argumento o con su variable de entorno. El argume
 | `--alert-webhook URL` | `PRIVATETRACKER_ALERT_WEBHOOK` | ninguno |
 | `--alert-webhook-format json\|ntfy` | `PRIVATETRACKER_ALERT_WEBHOOK_FORMAT` | ntfy si el host es `ntfy.*`; si no, json |
 | `--alert-webhook-token TOKEN` | `PRIVATETRACKER_ALERT_WEBHOOK_TOKEN` | ninguno; mejor por variable, porque otros usuarios del equipo ven los argumentos con `ps` |
+| `--relay NOMBRE[:PUERTO]` | `PRIVATETRACKER_RELAY` | ninguno |
+| `--relay-fingerprint HUELLA` | `PRIVATETRACKER_RELAY_FINGERPRINT` | obligatoria con `--relay` |
+| `--relay-web true\|false` | `PRIVATETRACKER_RELAY_WEB` | false |
 | | `PRIVATETRACKER_LOG_LEVEL` | info |
 
 ## Red

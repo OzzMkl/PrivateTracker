@@ -24,12 +24,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- The server's pairing QR code is a privatetracker://pair link. -->
+            <!-- The server's pairing QR code is a privatetracker://pair link; another server's invite (1.0), privatetracker://peer. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="privatetracker" android:host="pair" />
+                <data android:scheme="privatetracker" android:host="peer" />
             </intent-filter>
         </activity>
 

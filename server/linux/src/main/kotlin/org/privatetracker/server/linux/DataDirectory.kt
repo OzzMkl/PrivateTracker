@@ -1,19 +1,9 @@
 package org.privatetracker.server.linux
 
+import org.privatetracker.server.hostkeys.lockFile
+import org.privatetracker.server.hostkeys.prepareOwnerOnlyDirectory
 import java.io.IOException
-import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
-import java.nio.channels.OverlappingFileLockException
-import java.nio.file.FileSystemException
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption.ATOMIC_MOVE
-import java.nio.file.StandardCopyOption.REPLACE_EXISTING
-import java.nio.file.StandardOpenOption
-import java.nio.file.StandardOpenOption.READ
-import java.nio.file.StandardOpenOption.WRITE
-import java.nio.file.attribute.PosixFilePermission
-import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * Everything the server keeps lives in one directory that only its user can enter (0700): in Docker,
@@ -46,23 +36,7 @@ class DataDirectory(val root: Path) {
      * Takes the directory for this process: an OS file lock, released when it closes or the process
      * dies. Null when another server holds it, even one that started at the same moment.
      */
-    fun lock(): AutoCloseable? {
-        val channel = FileChannel.open(
-            root.resolve("server.lock"),
-            setOf(StandardOpenOption.CREATE, WRITE),
-            PosixFilePermissions.asFileAttribute(OWNER_ONLY_FILE),
-        )
-        val lock = try {
-            channel.tryLock()
-        } catch (e: OverlappingFileLockException) {
-            null
-        }
-        if (lock == null) {
-            channel.close()
-            return null
-        }
-        return AutoCloseable { channel.close() }
-    }
+    fun lock(): AutoCloseable? = lockFile(root.resolve("server.lock"))
 
     /**
      * Creates the directory, or closes one that others could enter. Throws IOException, with a message
@@ -73,22 +47,10 @@ class DataDirectory(val root: Path) {
         if (adminSocket.toString().encodeToByteArray().size > MAX_SOCKET_PATH_BYTES) {
             throw IOException("la ruta es demasiado larga para el socket de administración (Linux admite $MAX_SOCKET_PATH_BYTES bytes); usa una más corta con --data")
         }
-        if (!Files.isDirectory(root)) {
-            Files.createDirectories(root, PosixFilePermissions.asFileAttribute(OWNER_ONLY_DIRECTORY))
-        }
-        if (Files.getPosixFilePermissions(root) != OWNER_ONLY_DIRECTORY) {
-            try {
-                Files.setPosixFilePermissions(root, OWNER_ONLY_DIRECTORY)
-            } catch (e: FileSystemException) {
-                throw IOException("otros usuarios pueden entrar y este usuario no puede impedirlo (chmod 700)", e)
-            }
-        }
+        prepareOwnerOnlyDirectory(root)
     }
 
     companion object {
-        val OWNER_ONLY_DIRECTORY: Set<PosixFilePermission> = PosixFilePermissions.fromString("rwx------")
-        val OWNER_ONLY_FILE: Set<PosixFilePermission> = PosixFilePermissions.fromString("rw-------")
-
         /** sun_path holds 108 bytes on Linux, the last one for the terminating zero. */
         const val MAX_SOCKET_PATH_BYTES = 107
 
@@ -98,25 +60,5 @@ class DataDirectory(val root: Path) {
                 ?: Path.of(environment["XDG_DATA_HOME"] ?: "${System.getProperty("user.home")}/.local/share", "privatetracker").toString()
             return DataDirectory(Path.of(path).toAbsolutePath().normalize())
         }
-    }
-}
-
-/**
- * Replaces [target] with [bytes] so that a crash leaves the old file or the new one, never half of
- * either, and the new file is readable by its owner only (0600) from the moment it exists.
- */
-fun writeAtomically(target: Path, bytes: ByteArray) {
-    val directory = target.toAbsolutePath().parent
-    val temp = Files.createTempFile(directory, ".${target.fileName}", ".tmp", PosixFilePermissions.asFileAttribute(DataDirectory.OWNER_ONLY_FILE))
-    try {
-        FileChannel.open(temp, WRITE).use { channel ->
-            channel.write(ByteBuffer.wrap(bytes))
-            channel.force(true)
-        }
-        Files.move(temp, target, ATOMIC_MOVE, REPLACE_EXISTING)
-        // The rename itself survives a power cut only once the directory is on disk too.
-        FileChannel.open(directory, READ).use { it.force(true) }
-    } finally {
-        Files.deleteIfExists(temp)
     }
 }

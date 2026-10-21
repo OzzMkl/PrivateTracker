@@ -7,11 +7,12 @@ import org.privatetracker.core.domain.model.WebAccount
 import org.privatetracker.core.domain.model.WebSession
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.protocol.crypto.EcdsaP256
+import org.privatetracker.server.hostkeys.OwnerOnly
+import org.privatetracker.server.hostkeys.SelfSignedCertificate
 import org.privatetracker.server.linux.keys.Der
 import org.privatetracker.server.linux.keys.Pem
 import org.privatetracker.server.linux.keys.PemFiles
 import org.privatetracker.server.linux.keys.ReloadingKeyManager
-import org.privatetracker.server.linux.keys.SelfSignedCertificate
 import org.privatetracker.server.linux.keys.WebCertificateException
 import org.privatetracker.server.linux.keys.WebKeyPair
 import org.privatetracker.server.linux.keys.sha256
@@ -207,7 +208,7 @@ class WebFilesTest {
         assertEquals(1, reopenedSessions.deleteAll("ana"))
         assertTrue(reopened.delete("ana"))
         assertEquals(emptyList(), JsonFileWebAccountRepository(accountsFile).all())
-        assertEquals(DataDirectory.OWNER_ONLY_FILE, Files.getPosixFilePermissions(accountsFile))
-        assertEquals(DataDirectory.OWNER_ONLY_FILE, Files.getPosixFilePermissions(sessionsFile))
+        assertEquals(OwnerOnly.FILE, Files.getPosixFilePermissions(accountsFile))
+        assertEquals(OwnerOnly.FILE, Files.getPosixFilePermissions(sessionsFile))
     }
 }

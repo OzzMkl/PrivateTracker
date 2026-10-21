@@ -49,6 +49,7 @@ fun DomainError.toApiException(): ApiException = when (this) {
     DomainError.DeviceRejected -> ApiException(HttpStatusCode.Forbidden, ErrorCode.DEVICE_REJECTED, "The server's owner rejected this device")
     DomainError.PairingInvalid ->
         ApiException(HttpStatusCode.Forbidden, ErrorCode.PAIRING_INVALID, "The QR code expired, was used by another phone, or does not match")
+    DomainError.PeerUnknown -> ApiException(HttpStatusCode.Forbidden, ErrorCode.PEER_UNKNOWN, "This server is not paired with yours")
     is DomainError.AuthenticationFailed -> when (reason) {
         AuthFailure.KEY_MISMATCH ->
             ApiException(HttpStatusCode.Conflict, ErrorCode.KEY_MISMATCH, "This device is registered with another key")

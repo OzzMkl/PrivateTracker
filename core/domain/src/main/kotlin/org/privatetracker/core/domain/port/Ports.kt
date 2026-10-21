@@ -14,10 +14,13 @@ import org.privatetracker.core.domain.model.LocationBatchResult
 import org.privatetracker.core.domain.model.LocationFix
 import org.privatetracker.core.domain.model.LocationPriority
 import org.privatetracker.core.domain.model.NetworkAddress
+import org.privatetracker.core.domain.model.PeerJoin
+import org.privatetracker.core.domain.model.PeerWelcome
 import org.privatetracker.core.domain.model.RegistrationResult
 import org.privatetracker.core.domain.model.ServerActivity
 import org.privatetracker.core.domain.model.ServerInfo
 import org.privatetracker.core.domain.model.ServerPin
+import org.privatetracker.core.domain.model.SyncBatch
 import org.privatetracker.core.domain.model.TrackerActivity
 import java.security.PrivateKey
 import java.time.Duration
@@ -61,6 +64,19 @@ interface ServerGateway {
         locations: List<Location>,
         encryptionKey: EncryptionKey,
     ): Outcome<LocationBatchResult>
+}
+
+/**
+ * How this server talks to a paired one (1.0): over TLS to the holder of the key it pinned, each
+ * request signed with this server's identity key. A server with another key is refused during the
+ * handshake as [ServerIdentityMismatch][org.privatetracker.core.common.result.DomainError.ServerIdentityMismatch].
+ */
+interface PeerGateway {
+    /** Joins the server at [url] whose invite named [inviterKey]. */
+    suspend fun join(url: String, inviterKey: String, join: PeerJoin): Outcome<PeerWelcome>
+
+    /** Sends [batch] to the paired server at [url] holding [peerKey]; its answer is the other half of the exchange. */
+    suspend fun exchange(url: String, peerKey: String, batch: SyncBatch): Outcome<SyncBatch>
 }
 
 /**
@@ -117,8 +133,11 @@ interface SignatureVerifier {
 
 /** Nonces of recently accepted requests, so a captured request cannot be sent again. */
 fun interface NonceRegistry {
-    /** Remembers [nonce] of [deviceId] until [expiresAt]. False when it was already seen: a replay. */
-    fun register(deviceId: DeviceId, nonce: String, expiresAt: Instant): Boolean
+    /**
+     * Remembers [nonce] of [signer] (a device id, or a paired server's label) until [expiresAt]. False
+     * when it was already seen: a replay.
+     */
+    fun register(signer: String, nonce: String, expiresAt: Instant): Boolean
 }
 
 /**

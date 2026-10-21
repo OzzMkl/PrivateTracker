@@ -38,6 +38,17 @@
     <string name="server_pairing_close">Listo</string>
 
     <string name="server_addresses">Direcciones para los Trackers</string>
+    <string name="server_relay">Relay</string>
+    <string name="server_relay_address">Relay</string>
+    <string name="server_relay_off">Apagado: el servidor no está corriendo</string>
+    <string name="server_relay_connecting">Conectando…</string>
+    <string name="server_relay_connected">Conectado</string>
+    <string name="server_relay_not_allowed">El relay no acepta este servidor: su dueño debe agregar la huella de este teléfono</string>
+    <string name="server_relay_version">El relay es de otra versión</string>
+    <string name="server_relay_key_mismatch">El relay mostró otra clave: revisa su huella en Ajustes</string>
+    <string name="server_relay_unreachable">Sin conexión con el relay; reintentando</string>
+    <string name="server_relay_url">Fuera de casa, los Trackers llegan por</string>
+    <string name="server_relay_hint">El relay pasa las conexiones cifradas sin abrirlas. Los Trackers ya emparejados aprenden su dirección solos en su siguiente comprobación diaria; los nuevos la reciben en el código QR.</string>
     <string name="server_addresses_hint">Escribe una de estas URL en los ajustes de cada teléfono que vaya a enviar su ubicación.</string>
     <string name="server_addresses_none">Este teléfono no tiene ninguna red activa. Conéctalo a tu Wi-Fi o VPN.</string>
     <string name="server_kind_lan">Red local</string>
@@ -66,4 +77,51 @@
     <string name="server_notification_running">Escuchando en el puerto %1$d</string>
     <string name="server_notification_port_in_use" tools:ignore="PluralsCandidate">El puerto %1$d está ocupado</string>
     <string name="server_notification_failed">No pudo arrancar</string>
+    <!-- Paired servers (1.0) -->
+    <string name="server_peers_title">Servidores emparejados</string>
+    <string name="server_peers_body">Dos servidores emparejados comparten en ambos sentidos sus dispositivos y posiciones, más o menos cada minuto: aprobar, renombrar o borrar un dispositivo en uno vale en los dos. Geocercas, cuentas y claves siguen siendo de cada uno.</string>
+    <string name="server_peers_none">Este servidor no está emparejado con ningún otro.</string>
+    <plurals name="server_peers_count">
+        <item quantity="one">Comparte sus dispositivos y posiciones con %d servidor.</item>
+        <item quantity="other">Comparte sus dispositivos y posiciones con %d servidores.</item>
+    </plurals>
+    <string name="server_peers_manage">Administrar</string>
+    <string name="server_peers_join">Unirme a otro</string>
+    <string name="server_peers_invite">Invitar a otro</string>
+    <string name="server_peers_remove">Dejar de compartir</string>
+    <string name="server_peers_remove_title">¿Dejar de compartir con «%1$s»?</string>
+    <string name="server_peers_remove_body">Este servidor deja de enviarle y de recibir de él. Lo que ya llegó se queda. Quita también el emparejamiento en el otro servidor.</string>
+    <string name="server_peers_state_ok">Al día</string>
+    <string name="server_peers_state_new">Todavía sin intercambios</string>
+    <string name="server_peers_state_unreachable">No se le alcanza; reintentando</string>
+    <string name="server_peers_state_unknown">Ese servidor ya no está emparejado con este</string>
+    <string name="server_peers_state_other">En su dirección responde otro servidor</string>
+    <string name="server_peers_fingerprint">Huella</string>
+    <string name="server_peers_last_exchange">Último intercambio</string>
+    <string name="server_peers_never">nunca</string>
+    <string name="server_peers_paired_at">Emparejado</string>
+    <string name="server_peers_address">Dirección</string>
+    <string name="server_peers_invite_title">Invitar a otro servidor</string>
+    <string name="server_peers_invite_scan_title">Invitación de un solo uso</string>
+    <string name="server_peers_invite_body">En otro teléfono servidor: Servidor › Servidores emparejados › Unirme a otro, y escanea este código. En un servidor Linux, pega el enlace en su app web o cuando lo pida privatetracker-server peers join.</string>
+    <string name="server_peers_invite_qr_description">Código QR para emparejar otro servidor</string>
+    <string name="server_peers_invite_link_hint">Enlace de la invitación:</string>
+    <string name="server_peers_invite_done">Emparejado con «%1$s» (huella %2$s). Compara la huella con la que muestra ese servidor.</string>
+    <string name="server_peers_share">Compartir</string>
+    <string name="server_peers_join_title">Unirme a otro servidor</string>
+    <string name="server_peers_join_scan_title">La invitación del otro servidor</string>
+    <string name="server_peers_join_scan_body">Escanea el código que muestra el otro servidor, o pega su enlace.</string>
+    <string name="server_peers_allow_camera">Permitir la cámara</string>
+    <string name="server_peers_camera_denied">Sin permiso de cámara no se puede escanear. Concédelo en los ajustes del sistema, o pega el enlace.</string>
+    <string name="server_peers_open_app_settings">Ajustes del sistema</string>
+    <string name="server_peers_join_paste">Enlace privatetracker://peer?…</string>
+    <string name="server_peers_join_continue">Continuar</string>
+    <string name="server_peers_join_foreign">Eso no es una invitación de servidor; la de emparejar un teléfono rastreador no sirve aquí.</string>
+    <string name="server_peers_join_confirm_title">¿Emparejar con «%1$s»?</string>
+    <string name="server_peers_join_confirm_body">Los dos servidores compartirán sus dispositivos y posiciones. Compara esta huella con la que muestra el otro servidor.</string>
+    <string name="server_peers_join_confirm">Emparejar</string>
+    <string name="server_peers_join_server_stopped">El servidor de este teléfono está detenido: se emparejará, pero los dos servidores intercambian datos solo mientras corre.</string>
+    <string name="server_peers_join_working">Buscando al otro servidor y comprobando su clave…</string>
+    <string name="server_peers_join_done">Emparejado con «%1$s». El primer intercambio empieza ya; luego, uno por minuto.</string>
+    <string name="server_peers_join_again">Leer otra invitación</string>
 </resources>

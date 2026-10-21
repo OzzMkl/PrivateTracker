@@ -24,6 +24,7 @@ import org.privatetracker.core.domain.model.Platform
 import org.privatetracker.core.domain.model.encryptionKeyInput
 import org.privatetracker.core.domain.model.keyFingerprint
 import org.privatetracker.core.domain.model.pairingProof
+import org.privatetracker.core.domain.model.serverAddressesInput
 import org.privatetracker.core.domain.model.serverIdentityInput
 import org.privatetracker.core.domain.service.SessionTracker
 import org.privatetracker.core.domain.testing.DEVICE_A
@@ -79,6 +80,7 @@ import java.util.IdentityHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -98,6 +100,8 @@ class PrivateTrackerApiTest {
     private var shuttingDown = false
     private var requests = 0
     private var nonces = 0
+    private var addresses = emptyList<String>()
+    private var visitor: String? = null
 
     private fun dependencies(requestsPerMinute: Int): ServerDependencies {
         val sessions = SessionTracker(store, SequentialIdGenerator())
@@ -122,6 +126,8 @@ class PrivateTrackerApiTest {
             isLocalRequest = { local },
             isShuttingDown = { shuttingDown },
             onRequest = { requests++ },
+            advertisedAddresses = { addresses },
+            tunneledVisitor = { _, _ -> visitor },
         )
     }
 
@@ -222,6 +228,20 @@ class PrivateTrackerApiTest {
         // No challenge, or a malformed one: nothing signed.
         assertNull(client.get(ApiV1.HEALTH).decode(HealthResponse.serializer()).signature)
         assertNull(client.get(ApiV1.HEALTH) { parameter(ApiV1.CHALLENGE_PARAM, "short") }.decode(HealthResponse.serializer()).signature)
+    }
+
+    @Test
+    fun `health signs the server's addresses over the same challenge, apart from its identity`() = api {
+        addresses = listOf("https://192.168.1.20:8787", "https://9e9d7678d67df283.relay.example.org")
+        val challenge = "Y2hhbGxlbmdlLTEyMzQ1Ng"
+
+        val health = client.get(ApiV1.HEALTH) { parameter(ApiV1.CHALLENGE_PARAM, challenge) }.decode(HealthResponse.serializer())
+
+        assertEquals(addresses, health.addresses)
+        val signature = Base64.getDecoder().decode(assertNotNull(health.addressesSignature))
+        assertTrue(EcdsaP256.verify(serverKeys.publicKey(), serverAddressesInput(challenge, addresses), signature))
+        // Without a challenge nothing vouches for them, so none are sent.
+        assertNull(client.get(ApiV1.HEALTH).decode(HealthResponse.serializer()).addresses)
     }
 
     @Test
@@ -531,6 +551,35 @@ class PrivateTrackerApiTest {
         assertEquals(HttpStatusCode.TooManyRequests, limited.status)
         assertNotNull(limited.headers[HttpHeaders.RetryAfter])
         assertEquals("RATE_LIMITED", limited.problem().code)
+    }
+
+    @Test
+    fun `health is rate limited too, since through a relay anyone may ask`() = api(requestsPerMinute = 2) {
+        repeat(2) { assertEquals(HttpStatusCode.OK, client.get(ApiV1.HEALTH + "?challenge=AAAAAAAAAAAAAAAAAAAAAA").status) }
+
+        val limited = client.get(ApiV1.HEALTH)
+
+        assertEquals(HttpStatusCode.TooManyRequests, limited.status)
+        assertEquals("RATE_LIMITED", limited.problem().code)
+    }
+
+    @Test
+    fun `a visitor a relay tunnel brought in is never local, and its limits are its own`() = api(requestsPerMinute = 2) {
+        enroll()
+        // The tunnel connects from this machine, so the connection itself looks local.
+        visitor = "203.0.113.7"
+
+        val relayed = client.get(ApiV1.DEVICES)
+        assertEquals(HttpStatusCode.Forbidden, relayed.status)
+        assertEquals("LOCAL_ONLY", relayed.problem().code)
+        register()
+        assertEquals(HttpStatusCode.TooManyRequests, register().status)
+
+        visitor = "198.51.100.20"
+        assertNotEquals(HttpStatusCode.TooManyRequests, register().status)
+
+        visitor = null
+        assertEquals(HttpStatusCode.OK, client.get(ApiV1.DEVICES).status)
     }
 
     @Test

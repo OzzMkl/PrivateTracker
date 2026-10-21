@@ -65,7 +65,18 @@ data class ServerConfig(
     val exposeReadApi: Boolean = false,
     /** Announces the server on the local network (mDNS), so paired trackers find it after its address changes. */
     val advertiseOnLan: Boolean = true,
+    /**
+     * From 1.0: the relay this server keeps a tunnel to, as `host[:port]`, so trackers reach it from
+     * anywhere; blank for none. [relayFingerprint] is the relay's key, as its owner reads it out.
+     */
+    val relayAddress: String = "",
+    val relayFingerprint: String = "",
+    /** Also lets browsers reach the web app through the relay; only a Linux server has one. */
+    val relayWeb: Boolean = false,
 ) {
     val onlineThreshold: Duration get() = Duration.ofSeconds(onlineThresholdSeconds.toLong())
     val retention: Duration get() = Duration.ofDays(retentionDays.toLong())
+
+    /** The relay in use, or null: none set, or not a valid address (the validator says which). */
+    val relay: RelayAddress? get() = relayAddress.takeIf { it.isNotBlank() }?.let(RelayAddress::parse)
 }

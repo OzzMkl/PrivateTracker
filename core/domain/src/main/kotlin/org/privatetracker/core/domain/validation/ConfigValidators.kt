@@ -7,6 +7,7 @@ import org.privatetracker.core.common.result.FieldViolation.Companion.OUT_OF_RAN
 import org.privatetracker.core.common.result.FieldViolation.Companion.REQUIRED
 import org.privatetracker.core.common.result.FieldViolation.Companion.TOO_LONG
 import org.privatetracker.core.domain.model.Device
+import org.privatetracker.core.domain.model.RelayAddress
 import org.privatetracker.core.domain.model.ServerConfig
 import org.privatetracker.core.domain.model.TrackerConfig
 import org.privatetracker.core.domain.model.isValidFingerprint
@@ -84,6 +85,13 @@ object ServerConfigValidator {
         }
         if (config.retentionDays !in RETENTION_DAYS) add(FieldViolation("retentionDays", OUT_OF_RANGE))
         if (config.maxBatchSize !in BATCH_SIZE) add(FieldViolation("maxBatchSize", OUT_OF_RANGE))
+        if (config.relayAddress.isNotBlank()) {
+            if (RelayAddress.parse(config.relayAddress) == null) add(FieldViolation("relayAddress", INVALID_FORMAT))
+            when {
+                config.relayFingerprint.isBlank() -> add(FieldViolation("relayFingerprint", REQUIRED))
+                !isValidFingerprint(config.relayFingerprint) -> add(FieldViolation("relayFingerprint", INVALID_FORMAT))
+            }
+        }
     }
 
     private fun isIpLiteral(raw: String): Boolean =

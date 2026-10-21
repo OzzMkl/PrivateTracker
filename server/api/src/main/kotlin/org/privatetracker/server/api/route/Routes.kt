@@ -16,6 +16,7 @@ import org.privatetracker.core.domain.model.DeviceId
 import org.privatetracker.core.domain.model.RejectionReason
 import org.privatetracker.core.domain.model.ServerIdentity
 import org.privatetracker.core.domain.model.ServerInfo
+import org.privatetracker.core.domain.model.serverAddressesInput
 import org.privatetracker.core.domain.model.serverIdentityInput
 import org.privatetracker.core.domain.port.DeviceKeyException
 import org.privatetracker.core.protocol.mapper.toDomain
@@ -39,6 +40,7 @@ import org.privatetracker.server.api.plugin.describe
 import org.privatetracker.server.api.plugin.getOrThrowApi
 import org.privatetracker.server.api.plugin.openSealed
 import org.privatetracker.server.api.plugin.receiveJsonBytes
+import org.privatetracker.server.api.plugin.isLocal
 import org.privatetracker.server.api.plugin.remoteAddressOrNull
 import org.privatetracker.server.api.plugin.respondSealed
 import org.privatetracker.server.api.plugin.sealedAnswer
@@ -62,7 +64,12 @@ fun Route.healthRoutes(deps: ServerDependencies) {
         val identity = challenge?.let {
             try {
                 val input = serverIdentityInput(it, now, encryptionKey?.key?.id)
-                ServerIdentity(deps.serverKeys.publicKey(), Base64.getEncoder().encodeToString(deps.serverKeys.sign(input)))
+                val signature = Base64.getEncoder().encodeToString(deps.serverKeys.sign(input))
+                // From 1.0 its addresses too, signed apart, so earlier trackers check what they always did.
+                val addresses = deps.advertisedAddresses()
+                val addressesSignature = addresses.takeIf { list -> list.isNotEmpty() }
+                    ?.let { list -> Base64.getEncoder().encodeToString(deps.serverKeys.sign(serverAddressesInput(it, list))) }
+                ServerIdentity(deps.serverKeys.publicKey(), signature, addresses.takeIf { addressesSignature != null }.orEmpty(), addressesSignature)
             } catch (e: DeviceKeyException) {
                 call.application.log.error("Server key unavailable", e)
                 null
@@ -82,7 +89,7 @@ fun Route.deviceRoutes(deps: ServerDependencies) {
         val signed = call.signedRequest(body)
         val opened = call.openSealed(deps, body)
         val registration = decodeJson(RegisterDeviceRequest.serializer(), opened.plaintext, sealed = true).toDomain().getOrThrowApi()
-        val result = deps.registerOrUpdateDevice(registration, signed, call.remoteAddressOrNull()).getOrThrowApi()
+        val result = deps.registerOrUpdateDevice(registration, signed, call.remoteAddressOrNull(deps)).getOrThrowApi()
         val answer = ProtocolJson.encodeToString(RegisterDeviceResponse.serializer(), result.toDto())
         call.respondSealed(sealedAnswer(opened, answer), if (result.created) HttpStatusCode.Created else HttpStatusCode.OK)
     }
@@ -126,7 +133,7 @@ fun Route.locationRoutes(deps: ServerDependencies) {
         }
         val valid = mapped.mapNotNull { (_, outcome) -> outcome.getOrNull() }
 
-        val result = deps.ingestLocationBatch(deviceId, valid, call.remoteAddressOrNull()).getOrThrowApi().toDto()
+        val result = deps.ingestLocationBatch(deviceId, valid, call.remoteAddressOrNull(deps)).getOrThrowApi().toDto()
         val response = ProtocolJson.encodeToString(LocationBatchResponse.serializer(), result.copy(rejected = malformed + result.rejected))
         // Signed acknowledgment, over the sealed answer: a paired tracker deletes nothing on an answer this server did not sign.
         val bytes = sealedAnswer(opened, response)
@@ -141,7 +148,7 @@ fun Route.locationRoutes(deps: ServerDependencies) {
 }
 
 private suspend fun ApplicationCall.requireReadAccess(deps: ServerDependencies) {
-    if (!deps.serverConfig.get().exposeReadApi && !deps.isLocalRequest(this)) {
+    if (!deps.serverConfig.get().exposeReadApi && !isLocal(deps)) {
         throw ApiException(HttpStatusCode.Forbidden, ErrorCode.LOCAL_ONLY, "Read endpoints only answer requests from the server itself")
     }
 }

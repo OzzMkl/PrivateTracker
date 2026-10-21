@@ -15,13 +15,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
+import org.privatetracker.core.common.result.Outcome
 import org.privatetracker.core.domain.model.DeviceApproval
 import org.privatetracker.core.domain.model.GeofenceShape
+import org.privatetracker.core.domain.model.PairingInvite
+import org.privatetracker.core.domain.model.Peer
 import org.privatetracker.core.domain.testing.DEVICE_A
 import org.privatetracker.core.domain.testing.DEVICE_B
 import org.privatetracker.core.domain.testing.T0
 import org.privatetracker.core.domain.testing.aDevice
 import org.privatetracker.core.domain.testing.aLocation
+import org.privatetracker.core.domain.testing.fakeServerKey
 import org.privatetracker.core.domain.usecase.server.SignIn
 import org.privatetracker.core.protocol.v1.PairingUri
 import org.privatetracker.server.web.security.SESSION_COOKIE
@@ -505,6 +509,58 @@ class WebAppTest {
         assertEquals("no-store", client.get("/assets/0000/app.css").headers[HttpHeaders.CacheControl])
         assertEquals(HttpStatusCode.NotFound, client.get("/assets/${css.groupValues[1]}/../../etc/passwd").status)
         assertEquals(HttpStatusCode.OK, client.get("/assets/${css.groupValues[1]}/vendor/maplibre-gl/maplibre-gl-csp-worker.js").status)
+    }
+
+    @Test
+    fun `the servers page lists paired servers, invites another and stops sharing with one`() = bed.run {
+        bed.account()
+        val client = browser()
+        val token = client.signIn()
+        val office = Peer(fakeServerKey("oficina"), "Oficina", listOf("https://10.0.0.5:8787"), T0)
+        runBlocking { bed.peers.save(office) }
+
+        val page = client.getPage("/peers", token).bodyAsText()
+        assertContains(page, "Oficina")
+        assertContains(page, office.fingerprint)
+        assertContains(page, "todavía sin intercambios")
+        assertContains(client.getPage("/server", token).bodyAsText(), "Servidores emparejados")
+
+        val created = client.post("/peers/invite") { signedIn(token); fromThisSite() }
+        val invitePath = created.headers[HttpHeaders.Location]!!
+        val ticket = invitePath.substringAfterLast('/')
+        val invitePage = client.getPage(invitePath, token).bodyAsText()
+        assertContains(invitePage, "<svg")
+        val uri = Regex("value=\"(privatetracker://peer[^\"]+)\"").find(invitePage)!!.groupValues[1].replace("&amp;", "&")
+        assertEquals(ticket, PairingUri.parse(uri, PairingUri.PEER_HOST)?.ticketId)
+        // A tracker's camera does not take it for a phone invite.
+        assertNull(PairingUri.parse(uri))
+        bed.peerTickets.consume(ticket, office.publicKey)
+        val joined = client.get("$invitePath/status") { signedIn(token); header("HX-Request", "true") }.bodyAsText()
+        assertContains(joined, "Emparejado con Oficina")
+
+        val removed = client.submitForm("/peers/${office.label}/remove", Parameters.Empty) { signedIn(token); fromThisSite() }
+        assertEquals("/peers?done=removed", removed.headers[HttpHeaders.Location])
+        assertTrue(runBlocking { bed.peers.all() }.isEmpty())
+    }
+
+    @Test
+    fun `joining another server needs one of its invites, and says why it failed`() = bed.run {
+        bed.account()
+        val client = browser()
+        val token = client.signIn()
+
+        val wrong = client.submitForm("/peers/join", Parameters.build { append("link", "privatetracker://pair?v=1") }) { signedIn(token); fromThisSite() }
+        assertEquals(HttpStatusCode.UnprocessableEntity, wrong.status)
+        assertContains(wrong.bodyAsText(), "no es una invitación de servidor")
+
+        val invite = PairingInvite("Oficina", listOf("https://10.0.0.5:8787"), fakeServerKey("oficina"), "t1", "AAAAAAAAAAAAAAAAAAAAAA", T0.plusSeconds(600))
+        val link = PairingUri.format(invite, PairingUri.PEER_HOST)
+        val unreachable = client.submitForm("/peers/join", Parameters.build { append("link", link) }) { signedIn(token); fromThisSite() }
+        assertContains(unreachable.bodyAsText(), "No se pudo llegar al otro servidor")
+
+        bed.joinAnswer = { Outcome.Success(Peer(it.serverKey, it.serverName, it.serverUrls, T0)) }
+        val joined = client.submitForm("/peers/join", Parameters.build { append("link", link) }) { signedIn(token); fromThisSite() }
+        assertEquals("/peers?done=joined", joined.headers[HttpHeaders.Location])
     }
 
     @Test

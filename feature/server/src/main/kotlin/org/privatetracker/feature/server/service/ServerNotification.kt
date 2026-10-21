@@ -6,8 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import androidx.core.app.NotificationCompat
-import org.privatetracker.feature.server.R
 import org.privatetracker.core.designsystem.R as DesignR
+import org.privatetracker.feature.server.R
 
 /** The ongoing notification of the server service. */
 internal object ServerNotification {

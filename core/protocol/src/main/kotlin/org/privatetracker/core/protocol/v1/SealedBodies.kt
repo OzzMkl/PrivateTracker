@@ -33,8 +33,8 @@ import javax.crypto.Cipher
  * whatever forwards them later, such as the relay of 1.0, which will hold a TLS key of its own.
  */
 object SealedBodies {
-    private val INFO = "PrivateTracker-sealed-v1".encodeToByteArray()
-    private val RESPONSE_LABEL = "PrivateTracker-response-v1".encodeToByteArray()
+    internal val INFO = "PrivateTracker-sealed-v1".encodeToByteArray()
+    internal val RESPONSE_LABEL = "PrivateTracker-response-v1".encodeToByteArray()
     private const val RESPONSE_KEY_LENGTH = 16
     private const val RESPONSE_NONCE_LENGTH = 12
     private val random = SecureRandom()
@@ -122,7 +122,7 @@ object SealedBodies {
 
     private fun JsonObject.isEnvelope(): Boolean = "ciphertext" in this
 
-    private fun aad(method: String, path: String): ByteArray = "PrivateTracker-request-v1\n${method.uppercase()}\n$path".encodeToByteArray()
+    internal fun aad(method: String, path: String): ByteArray = "PrivateTracker-request-v1\n${method.uppercase()}\n$path".encodeToByteArray()
 
     private fun encode(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 

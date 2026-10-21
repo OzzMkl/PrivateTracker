@@ -13,7 +13,7 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "devices",
-    indices = [Index(value = ["device_uid"], unique = true)],
+    indices = [Index(value = ["device_uid"], unique = true), Index(value = ["change_seq"])],
 )
 data class DeviceEntity(
     @PrimaryKey(autoGenerate = true) @ColumnInfo(name = "id") val id: Long = 0,
@@ -29,6 +29,12 @@ data class DeviceEntity(
     @ColumnInfo(name = "last_location_id") val lastLocationId: Long?,
     /** PENDING, APPROVED or REJECTED. Devices from version 1 have no key, so they start over as PENDING. */
     @ColumnInfo(name = "approval", defaultValue = "PENDING") val approval: String,
+    /** 1.0: when its details last changed, on whichever paired server; null before 1.0. */
+    @ColumnInfo(name = "updated_at") val updatedAt: Long? = null,
+    /** 1.0: when the owner last decided on its approval, on whichever paired server; null before 1.0. */
+    @ColumnInfo(name = "approval_changed_at") val approvalChangedAt: Long? = null,
+    /** 1.0: this server's number for the device's last change, from [SyncCounterEntity]; paired servers ask for what came after. */
+    @ColumnInfo(name = "change_seq", defaultValue = "0") val changeSeq: Long = 0,
 )
 
 @Entity(
@@ -71,6 +77,8 @@ data class LocationEntity(
     @ColumnInfo(name = "is_mock", defaultValue = "0") val isMock: Boolean,
     @ColumnInfo(name = "recorded_at") val recordedAt: Long,
     @ColumnInfo(name = "received_at") val receivedAt: Long,
+    /** 1.0: peers.id of the paired server it came from, never sent back there; null when its tracker sent it here. */
+    @ColumnInfo(name = "from_peer") val fromPeer: Long? = null,
 )
 
 @Entity(
@@ -119,4 +127,42 @@ data class TrackPointRow(
 data class SessionRow(
     @Embedded val session: DeviceSessionEntity,
     @ColumnInfo(name = "device_uid") val deviceUid: String,
+)
+
+/** 1.0: a server this one is paired with. [publicKey] is its identity; the cursors are how far the two got. */
+@Entity(tableName = "peers", indices = [Index(value = ["public_key"], unique = true), Index(value = ["label"], unique = true)])
+data class PeerEntity(
+    @PrimaryKey(autoGenerate = true) @ColumnInfo(name = "id") val id: Long = 0,
+    @ColumnInfo(name = "public_key") val publicKey: String,
+    /** Fingerprint without dashes, lower case: how it names itself in the requests it signs. */
+    @ColumnInfo(name = "label") val label: String,
+    @ColumnInfo(name = "name") val name: String,
+    /** One per line, in the order to try them. */
+    @ColumnInfo(name = "addresses") val addresses: String,
+    @ColumnInfo(name = "paired_at") val pairedAt: Long,
+    @ColumnInfo(name = "last_exchange_at") val lastExchangeAt: Long?,
+    @ColumnInfo(name = "last_attempt_at") val lastAttemptAt: Long?,
+    @ColumnInfo(name = "last_error") val lastError: String?,
+    @ColumnInfo(name = "received_locations") val receivedLocations: Long,
+    @ColumnInfo(name = "received_devices") val receivedDevices: Long,
+    @ColumnInfo(name = "sent_locations") val sentLocations: Long,
+    @ColumnInfo(name = "sent_devices") val sentDevices: Long,
+)
+
+/** 1.0: a device removed here or on a paired server, so that every one of them removes it. */
+@Entity(tableName = "removed_devices", indices = [Index(value = ["change_seq"])])
+data class RemovedDeviceEntity(
+    @PrimaryKey @ColumnInfo(name = "device_uid") val deviceUid: String,
+    @ColumnInfo(name = "removed_at") val removedAt: Long,
+    @ColumnInfo(name = "change_seq") val changeSeq: Long,
+)
+
+/**
+ * 1.0: counters that only grow, by name. `device_changes` numbers every change to devices and
+ * removals, so a paired server can ask for what came after the last one it got.
+ */
+@Entity(tableName = "sync_counters")
+data class SyncCounterEntity(
+    @PrimaryKey @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "value") val value: Long,
 )

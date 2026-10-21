@@ -7,6 +7,8 @@ import org.privatetracker.core.domain.port.EncryptionKeyVault
 import org.privatetracker.core.domain.port.GeneratedEncryptionKey
 import org.privatetracker.core.protocol.crypto.EcdsaP256
 import org.privatetracker.core.protocol.crypto.P256
+import org.privatetracker.server.hostkeys.Pkcs12
+import org.privatetracker.server.hostkeys.guarded
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.KeyFactory

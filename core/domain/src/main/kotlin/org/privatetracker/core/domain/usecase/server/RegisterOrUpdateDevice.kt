@@ -99,6 +99,8 @@ class RegisterOrUpdateDevice(
                             lastSeenAt = now,
                             publicKey = registration.publicKey,
                             approval = approval,
+                            updatedAt = now,
+                            approvalChangedAt = now,
                         ),
                     )
                     approval
@@ -113,15 +115,21 @@ class RegisterOrUpdateDevice(
                         existing.publicKey == null -> DeviceApproval.PENDING
                         else -> existing.approval
                     }
+                    val updated = existing.copy(
+                        name = name,
+                        platform = registration.platform,
+                        appVersion = registration.appVersion,
+                        protocolVersion = registration.protocolVersion,
+                        lastSeenAt = now,
+                        publicKey = registration.publicKey,
+                        approval = approval,
+                    )
+                    // Paired servers take a change only when something they show changed, not each time the tracker
+                    // checks in; its details and the owner's decision apart.
                     devices.update(
-                        existing.copy(
-                            name = name,
-                            platform = registration.platform,
-                            appVersion = registration.appVersion,
-                            protocolVersion = registration.protocolVersion,
-                            lastSeenAt = now,
-                            publicKey = registration.publicKey,
-                            approval = approval,
+                        updated.copy(
+                            updatedAt = if (updated.sameDetailsAs(existing)) existing.updatedAt else now,
+                            approvalChangedAt = if (approval == existing.approval) existing.approvalChangedAt else now,
                         ),
                     )
                     approval

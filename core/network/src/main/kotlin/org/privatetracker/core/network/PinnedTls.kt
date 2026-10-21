@@ -3,6 +3,7 @@ package org.privatetracker.core.network
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import okhttp3.ConnectionPool
+import okhttp3.Dns
 import org.privatetracker.core.domain.model.ServerPin
 import java.io.Closeable
 import java.net.Socket
@@ -56,9 +57,13 @@ fun interface PinnedClients {
 
 /**
  * One OkHttp client per pin. The few in use stay cached so connections get reused; one pushed out is
- * closed once its requests finish.
+ * closed once its requests finish. [dns] is the system's but in tests, where relay names resolve nowhere.
  */
-class OkHttpPinnedClients(private val userAgent: String, private val maxClients: Int = 4) : PinnedClients, Closeable {
+class OkHttpPinnedClients(
+    private val userAgent: String,
+    private val maxClients: Int = 4,
+    private val dns: Dns = Dns.SYSTEM,
+) : PinnedClients, Closeable {
     private val clients = object : LinkedHashMap<ServerPin, HttpClient>(maxClients, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ServerPin, HttpClient>): Boolean {
             if (size <= maxClients) return false
@@ -75,6 +80,7 @@ class OkHttpPinnedClients(private val userAgent: String, private val maxClients:
             config {
                 // Ktor's engines otherwise share one pool, which closing any of them empties.
                 connectionPool(ConnectionPool())
+                dns(this@OkHttpPinnedClients.dns)
                 sslSocketFactory(pinnedSslContext(trustManager).socketFactory, trustManager)
                 // Certificates name no address, and the server's addresses change: its key is what counts.
                 hostnameVerifier { _, _ -> true }

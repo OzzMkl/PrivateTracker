@@ -33,8 +33,17 @@ data class PairingTicket(
 /** What a registration made from a QR code carries instead of the secret itself. */
 data class PairingClaim(val ticketId: String, val proof: String)
 
-/** The server's signature over a tracker's challenge, so the tracker knows which server answered. */
-data class ServerIdentity(val publicKey: String, val signature: String)
+/**
+ * The server's signature over a tracker's challenge, so the tracker knows which server answered. From
+ * 1.0 it may add the [addresses] it can be reached at now, with a signature of their own over the same
+ * challenge, so paired trackers learn a new address, such as a relay's, without pairing again.
+ */
+data class ServerIdentity(
+    val publicKey: String,
+    val signature: String,
+    val addresses: List<String> = emptyList(),
+    val addressesSignature: String? = null,
+)
 
 const val PAIRING_SECRET_BYTES = 16
 
@@ -63,6 +72,14 @@ fun isValidPairingProof(secret: String, deviceId: DeviceId, publicKey: String, p
 fun serverIdentityInput(challenge: String, serverTime: Instant, encryptionKeyId: String? = null): ByteArray =
     ("PrivateTracker-server-v1\n$challenge\n${serverTime.toEpochMilli()}" + encryptionKeyId?.let { "\n$it" }.orEmpty())
         .encodeToByteArray()
+
+/**
+ * What the server signs to vouch for its [addresses] in the answer to [challenge]: fresh, so an old
+ * list, once true, cannot be passed off as the current one. Apart from [serverIdentityInput], so
+ * trackers from before 1.0 still check that one as they always did.
+ */
+fun serverAddressesInput(challenge: String, addresses: List<String>): ByteArray =
+    (listOf("PrivateTracker-addresses-v1", challenge) + addresses).joinToString("\n").encodeToByteArray()
 
 /** A server announcing itself on the local network, as a tracker found it. */
 data class DiscoveredServer(val url: String, val keyHint: String?)
